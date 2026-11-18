@@ -27,6 +27,7 @@ const reportOptions: Record<ReportFormat, { defaultPath: string; name: string; e
   markdown: { defaultPath: "codedoctor-report.md", name: "Markdown report", extension: "md" },
   txt: { defaultPath: "codedoctor-report.txt", name: "Text report", extension: "txt" },
   html: { defaultPath: "codedoctor-report.html", name: "HTML report", extension: "html" },
+  sarif: { defaultPath: "codedoctor-report.sarif", name: "SARIF report", extension: "sarif" },
 };
 
 export async function pickReportDestination(format: ReportFormat): Promise<string | null> {

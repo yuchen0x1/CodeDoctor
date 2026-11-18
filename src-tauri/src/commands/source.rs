@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager};
 
 #[cfg(test)]
@@ -32,6 +33,7 @@ pub struct IssueSourceContext {
     can_open_natively: bool,
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn read_issue_source(
     app: AppHandle,
@@ -45,6 +47,7 @@ pub async fn read_issue_source(
     .map_err(|_| AppError::Io("source context could not be read".into()))?
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_issue_source(
     app: AppHandle,

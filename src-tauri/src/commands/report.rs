@@ -2,15 +2,19 @@ use crate::domain::types::{Issue, PromptArtifact, PromptMode, ScanRun, ScanStatu
 use crate::error::AppError;
 use crate::history::compare_scans;
 use crate::prompt::{PromptProjectContext, generate_prompt};
-use crate::report::{ReportFormat, render_with_score};
+use crate::report::ReportFormat;
+#[cfg(feature = "desktop")]
+use crate::report::render_with_score;
 use crate::score::{ScanSnapshot, calculate_score};
 use crate::state::AppState;
 use crate::storage::Storage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
+#[cfg(feature = "desktop")]
 fn snapshot(state: &AppState, run_id: &str) -> Result<ScanSnapshot, AppError> {
     let store = state.storage()?;
     let run = completed_run(&store, run_id)?;
@@ -36,6 +40,7 @@ pub struct ReportResult {
     pub content: String,
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn calculate_report(state: State<AppState>, run_id: String) -> Result<ReportResult, AppError> {
     let snap = snapshot(&state, &run_id)?;
@@ -47,6 +52,7 @@ pub fn calculate_report(state: State<AppState>, run_id: String) -> Result<Report
     })
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn generate_governance_prompt(
     state: State<AppState>,
@@ -64,6 +70,7 @@ pub fn generate_governance_prompt(
     )
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn export_governance_prompt(
     state: State<AppState>,
@@ -174,6 +181,7 @@ fn export_stored_prompt(
     write_export(destination, &content)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn export_issue_list(
     state: State<AppState>,
@@ -189,6 +197,7 @@ pub fn export_issue_list(
     write_export(destination, &content)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn export_report(
     state: State<AppState>,
@@ -210,6 +219,7 @@ fn report_extension(format: ReportFormat) -> &'static str {
         ReportFormat::Markdown => "md",
         ReportFormat::Txt => "txt",
         ReportFormat::Html => "html",
+        ReportFormat::Sarif => "sarif",
     }
 }
 
@@ -241,6 +251,7 @@ fn write_export(destination: &Path, content: &str) -> Result<(), AppError> {
         .map_err(|_| AppError::Io("export file could not be written".into()))
 }
 
+#[cfg(feature = "desktop")]
 fn select_export_issues(issues: &[Issue], selected_ids: &[String]) -> Result<Vec<Issue>, AppError> {
     if selected_ids.is_empty() {
         return Ok(issues.to_vec());
@@ -390,6 +401,7 @@ mod tests {
             (ReportFormat::Markdown, "md"),
             (ReportFormat::Txt, "txt"),
             (ReportFormat::Html, "html"),
+            (ReportFormat::Sarif, "sarif"),
         ] {
             let file = std::env::temp_dir().join(format!("report.{suffix}"));
             let path = file.to_str().unwrap();

@@ -5,6 +5,7 @@ use crate::history::{HistoryDiff, compare_scans};
 use crate::score::{SCORING_VERSION, ScanSnapshot};
 use crate::state::AppState;
 use serde::Serialize;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
 fn snapshot(state: &AppState, run_id: &str) -> Result<ScanSnapshot, AppError> {
@@ -20,6 +21,7 @@ fn snapshot(state: &AppState, run_id: &str) -> Result<ScanSnapshot, AppError> {
     ScanSnapshot::load(&store, run)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn compare_scan_history(
     state: State<AppState>,
@@ -70,6 +72,7 @@ struct ScanScoreSummary {
     coverage: f32,
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_scan_runs(
     state: State<AppState>,

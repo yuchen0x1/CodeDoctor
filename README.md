@@ -1,14 +1,17 @@
 # CodeDoctor
 
-CodeDoctor 是一个离线优先的 Windows 桌面代码质量体检工具。它在本机读取项目或 ZIP 快照，建立文件索引，使用 Tree-sitter、词法规则、重复代码和依赖图分析生成可追溯的问题、评分、报告和治理提示词。
+CodeDoctor 是离线优先的代码质量体检工具。Windows 桌面工作台面向证据审阅、历史快照和治理提示词。Linux CLI 面向终端和 CI，在本机扫描目录或 ZIP，输出机器可读报告。
+
+[![CI](https://github.com/yuchen0x1/CodeDoctor/actions/workflows/ci.yml/badge.svg)](https://github.com/yuchen0x1/CodeDoctor/actions/workflows/ci.yml)
+[下载 CodeDoctor](https://github.com/yuchen0x1/CodeDoctor/releases/latest) · [安装和更新](docs/engineering/updating.md)
 
 ## 最新更新
 
-### 0.1.1（2026-11-18）
+### 0.2.0（2026-11-18）
 
-- 重新打开当前扫描快照后，仍可查看问题、评分和分析器结果。
-- 重复导入同一文件夹或 ZIP 时，保留当前扫描和历史报告，并刷新导入预览。
-- 原始文件夹或 ZIP 移动、删除后，仍可打开和导出之前保存的报告。
+- Windows 设置页可检查版本，安装版支持验证签名的应用内更新。
+- Linux x64 CLI 可在终端和 CI 扫描目录或 ZIP，并按严重度设置门禁。
+- 新增 SARIF 2.1.0 报告，可导入支持该格式的审阅工具。
 
 详见[更新记录](docs/releases/release-notes.md)。
 
@@ -18,11 +21,28 @@ CodeDoctor 是一个离线优先的 Windows 桌面代码质量体检工具。它
 
 | 产物 | 用法 |
 | --- | --- |
-| `bundle/nsis/CodeDoctor_0.1.1_x64-setup.exe` | 双击，按向导完成当前用户安装 |
-| `bundle/msi/CodeDoctor_0.1.1_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
+| `bundle/nsis/CodeDoctor_0.2.0_x64-setup.exe` | 双击，按向导完成当前用户安装 |
+| `bundle/msi/CodeDoctor_0.2.0_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
 | `codedoctor.exe` | 直接运行，免安装 |
 
 应用需要 Microsoft Edge WebView2 Runtime。免安装版也使用当前用户的本地扫描数据库，详情见[隐私与数据边界](docs/privacy.md)。
+
+## 平台能力
+
+| 能力 | Windows 桌面 x64 | Linux CLI x64 |
+| --- | --- | --- |
+| 目录和 ZIP 本地分析，JSON、Markdown、TXT、HTML 和 SARIF | 支持 | 支持 |
+| 源码证据视图、历史 SQLite、依赖图和治理提示词 | 支持 | 由桌面提供 |
+| 批处理和严重度门禁 | 使用桌面审阅 | 支持 |
+| 更新 | 安装版在应用内确认，免安装版手动替换 | 校验 GitHub 发行归档后替换 |
+
+Linux 示例
+
+```bash
+codedoctor-cli scan ./project --format sarif --fail-on high > report.sarif
+```
+
+退出码 `0` 表示报告生成并符合门禁，`1` 表示命令或扫描失败，`2` 表示报告生成且发现达到严重度门槛的问题。工具不需要 GUI 或 WebView。查看 [平台决策](docs/engineering/platforms.md)。
 
 ## 本地开发
 
@@ -47,7 +67,7 @@ Rust 依赖缓存可通过 `CARGO_HOME` 指向本机缓存目录；项目不需�
 2. 在“设置”保存扫描阈值、额外排除目录和本机 Ruff 偏好。扫描任务支持暂停、继续和取消。中断后可按原设置发起新扫描，复用校验通过的文件规则缓存。
 3. 在“问题分析”按文件、语言、模块、类型或严重度筛选，展开证据和对应源码行，或导出筛选后的 JSON 清单。架构图可查看静态依赖、循环和重复代码关系。
 4. 在“修复提示词”选择全面、重点或定点模式。任选同项目的已完成基线以生成增量任务书。生成后可复制或保存为 Markdown、TXT。
-5. 在“历史报告”比较同一项目的两个完成快照，或导出 JSON、Markdown、TXT、HTML 报告。
+5. 在“历史报告”比较同一项目的两个完成快照，或导出 JSON、Markdown、TXT、HTML、SARIF 报告。
 
 ## 可选本机分析器
 
@@ -65,4 +85,10 @@ Rust 依赖缓存可通过 `CARGO_HOME` 指向本机缓存目录；项目不需�
 
 [下载正式版](https://github.com/yuchen0x1/CodeDoctor/releases/latest) · [问题反馈](https://github.com/yuchen0x1/CodeDoctor/issues/new/choose) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [MIT 许可证](LICENSE)
 
-[架构与基线](docs/engineering/baseline.md) · [平台评估](docs/engineering/platforms.md) · [维护和发布](docs/engineering/maintenance.md)
+[架构与基线](docs/engineering/baseline.md) · [平台评估](docs/engineering/platforms.md) · [维护和发布](docs/engineering/maintenance.md) · [竞品与技术研究](docs/engineering/research.md)
+
+## 常见问题与路线图
+
+- 断网时可继续扫描、比较和导出。软件更新需要访问 GitHub。
+- 原项目移动后，已保存的历史报告仍可查看。重新扫描需导入可用目录或 ZIP。
+- 下一阶段优先维护 Windows 安装与更新链路、Linux CLI 的实际分发验证及标准报告互操作。各候选平台以独立验收结果为准。

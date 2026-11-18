@@ -20,7 +20,7 @@ const allNotes = await readFile("docs/releases/release-notes.md", "utf8");
 const notes = allNotes.split(/^## /m).slice(1).find((section) => section.startsWith(`${version}（`));
 assert(notes, `Missing release notes for ${tag}`);
 const notesPath = join(process.env.RUNNER_TEMP, "codedoctor-release-notes.md");
-await writeFile(notesPath, `## ${notes.trim()}\n\nWindows x64 EXE、MSI 和免安装版见附件。使用 SHA256SUMS.txt 校验下载。\n`);
+await writeFile(notesPath, `## ${notes.trim()}\n\nWindows x64 EXE、MSI 和免安装版，以及 Linux x64 CLI 归档见附件。使用 SHA256SUMS.txt 校验下载。Windows 安装包附带 Tauri 更新签名。Windows Authenticode 状态及各平台验证见仓库维护文档。\n`);
 
 const names = await readdir(directory);
 const existing = spawnSync("gh", ["release", "view", tag, "--json", "isDraft"], { encoding: "utf8" });

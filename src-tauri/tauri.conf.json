@@ -1,13 +1,16 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CodeDoctor",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "identifier": "com.codedoctor.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
-    "frontendDist": "../dist"
+    "frontendDist": "../dist",
+    "features": [
+      "desktop"
+    ]
   },
   "app": {
     "windows": [
@@ -45,6 +48,18 @@
         "installMode": "currentUser",
         "displayLanguageSelector": true,
         "startMenuFolder": "CodeDoctor"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFMEI4MUE2MkFEQjg2NkIKUldScmh0c3Fwb0VMcmtmY2xpMVZqUW5nOVhsOE5LK1VUbnJnbXZsbVpRSDVlSkp0TzUwSk1WYjIK",
+      "endpoints": [
+        "https://github.com/yuchen0x1/CodeDoctor/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

@@ -2,6 +2,7 @@
 pub mod html;
 pub mod json;
 pub mod markdown;
+mod sarif;
 
 use crate::domain::types::ScoreSnapshot;
 use crate::score::ScanSnapshot;
@@ -16,6 +17,7 @@ pub enum ReportFormat {
     Markdown,
     Txt,
     Html,
+    Sarif,
 }
 
 #[cfg(test)]
@@ -34,6 +36,7 @@ pub fn render_with_score(
         ReportFormat::Markdown => Ok(markdown::render(snapshot, score)),
         ReportFormat::Txt => Ok(markdown::render_text(snapshot, score)),
         ReportFormat::Html => Ok(html::render(snapshot, score)),
+        ReportFormat::Sarif => sarif::render(snapshot),
     }
 }
 
