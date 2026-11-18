@@ -134,8 +134,10 @@ export default function App() {
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
 
   const showRun = (next: ScanRunSummary | null) => {
-    activeRun.current = next?.run.id ?? "";
     setRun(next);
+    // Reopening the current scan leaves its result-loading effects unchanged.
+    if (next && activeRun.current === next.run.id) return;
+    activeRun.current = next?.run.id ?? "";
     setEvent(null);
     setIssues([]);
     setScore(null);
@@ -146,9 +148,10 @@ export default function App() {
   };
 
   const showProject = (next: ProjectSummary) => {
-    showRun(null);
     setProject(next);
     setPath(next.canonicalPath);
+    if (next.projectId === projectId) return;
+    showRun(null);
     setHistoryRuns([]);
     setHistoryDiff(null);
     setHistoryIssueDetails({});

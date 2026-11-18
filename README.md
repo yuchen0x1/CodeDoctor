@@ -4,11 +4,10 @@ CodeDoctor 是一个离线优先的 Windows 桌面代码质量体检工具。它
 
 ## 最新更新
 
-### 0.1.0（2026-11-18）
+### 0.1.1（2026-11-18）
 
-- 导入本地项目目录或 ZIP，进行只读扫描并检查源码证据。
-- 查看质量评分、检测覆盖率、重复片段、注释治理和静态依赖关系。
-- 比较历史扫描并生成全量或增量治理提示词，按需导出筛选后的问题清单和扫描报告。
+- 重新打开当前扫描快照后，仍可查看问题、评分和分析器结果。
+- 重复导入同一文件夹或 ZIP 时，保留当前扫描和历史报告，并刷新导入预览。
 
 详见[更新记录](docs/releases/release-notes.md)。
 
@@ -18,8 +17,8 @@ CodeDoctor 是一个离线优先的 Windows 桌面代码质量体检工具。它
 
 | 产物 | 用法 |
 | --- | --- |
-| `bundle/nsis/CodeDoctor_0.1.0_x64-setup.exe` | 双击，按向导完成当前用户安装 |
-| `bundle/msi/CodeDoctor_0.1.0_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
+| `bundle/nsis/CodeDoctor_0.1.1_x64-setup.exe` | 双击，按向导完成当前用户安装 |
+| `bundle/msi/CodeDoctor_0.1.1_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
 | `codedoctor.exe` | 直接运行，免安装 |
 
 应用需要 Microsoft Edge WebView2 Runtime。免安装版也使用当前用户的本地扫描数据库，详情见[隐私与数据边界](docs/privacy.md)。
