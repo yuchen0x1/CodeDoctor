@@ -1,9 +1,11 @@
 use crate::domain::types::{ArchitectureEdge, ScanRun, ScanStatus};
 use crate::error::AppError;
 use crate::graph::{Cycle, dependency_topology};
+#[cfg(feature = "desktop")]
 use crate::state::AppState;
 use serde::Serialize;
 use std::collections::BTreeSet;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +100,7 @@ fn build_graph_view(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_architecture_graph(
     state: State<AppState>,

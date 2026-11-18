@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+
+const executable = resolve(process.argv[2]);
+const run = (args) => spawnSync(executable, args, { encoding: "utf8" });
+const version = run(["--version"]);
+assert.equal(version.status, 0, version.stderr);
+assert.match(version.stdout, /^CodeDoctor CLI \d+\.\d+\.\d+/);
+const sarif = run(["scan", "fixtures", "--format", "sarif", "--fail-on", "high"]);
+assert.equal(sarif.status, 2, sarif.stderr);
+const report = JSON.parse(sarif.stdout);
+assert.equal(report.version, "2.1.0");
+assert.equal(report.runs[0].tool.driver.name, "CodeDoctor");
+assert(report.runs[0].results.some((finding) => finding.level === "error"));
+assert(report.runs[0].results.every((finding) => !finding.locations?.[0].physicalLocation.artifactLocation.uri.includes(":\\")));
+const bad = run(["scan", "fixtures/non-existent-directory"]);
+assert.equal(bad.status, 1);
+assert.equal(bad.stdout, "");
+console.log(`CLI verified ${report.runs[0].results.length} findings and the quality gate exit code`);

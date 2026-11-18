@@ -33,3 +33,22 @@
 3. **证据与修复**。PE 证书目录为空。`DllCharacteristics` 为 `0x8160`。二进制中完整的 PEM 私钥块计数为零，`commands/source.rs` 用 `PRIVATE KEY-----` 识别待遮蔽内容。发布流程应校验产物来源，Windows 签名另需受信任证书。保留本地调试能力，密钥仅存于签名环境。
 4. **客户端边界**。产品以本地只读分析为核心，规则和版本校验公钥按设计随客户端交付。扫描报告可能留有用户源码证据，分享前应检查内容。签名私钥和仓库写入凭据需要独立于客户端管理。
 5. **实施顺序**。先建立版本、测试和来源验证，再接入签名更新。将平台适配放进独立入口，避免给 CLI 引入桌面 WebView 依赖。
+
+## v0.2.0 发布候选
+
+本轮在 Windows x64 桌面应用之外，增加独立的 Linux x64 CLI 构建入口。CLI 执行目录或 ZIP 的本地扫描，支持 JSON、SARIF、Markdown、TXT 和 HTML 报告，并提供按严重级别设置的非零质量门禁。SARIF 文件位置使用相对 URI。
+
+Windows 桌面增加 GitHub Releases 更新检查、可配置检查周期、下载进度、SHA-256 和 Tauri 更新签名验证。安装前会确认没有运行中的扫描并备份 SQLite 数据库。更新安装只适用于 NSIS/MSI 安装版，免安装版需从发布页替换程序。
+
+仓库现已采用 MIT 许可证，配置 PR/Issue 模板、Dependabot、固定 SHA 的 Actions、Windows 与 Linux CLI CI、发布工作流、许可证通知、SHA-256 清单和 GitHub 构建证明。Windows 更新密钥通过 `release-signing` 环境签署，发布工作流会独立验证安装包签名。
+
+Windows x64 Authenticode 证书未配置，因此安装包没有 Windows 代码签名。Windows ARM64、Linux 桌面、macOS、移动端、Web、浏览器扩展和容器没有列为本版已支持平台。Linux CLI 的兼容矩阵仍需在相应发行版完成验证。
+
+| v0.2.0 检查 | 结果 |
+| --- | --- |
+| Rust 桌面测试 | 151 项通过 |
+| Rust CLI 编译和 CLI 实际扫描 | 通过，SARIF 37 条结果，`--fail-on high` 返回预期退出码 2 |
+| 前端类型检查、测试、构建 | 通过，22 项前端测试 |
+| npm 生产依赖审计 | 通过，改用 npm 官方 registry |
+| Rust Clippy | 桌面与 CLI 检查通过，现有核心代码有 Clippy 警告 |
+| 发布包许可证通知 | Windows 桌面与 Linux CLI 清单生成通过 |

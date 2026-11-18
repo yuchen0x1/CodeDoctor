@@ -520,6 +520,7 @@ struct ArchiveMember {
 }
 
 /// Read one scan member in memory after applying the same archive preflight as import.
+#[cfg(any(feature = "desktop", test))]
 pub(crate) fn read_zip_member(
     file: File,
     relative_path: &str,

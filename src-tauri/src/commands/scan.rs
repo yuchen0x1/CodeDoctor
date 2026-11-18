@@ -1,16 +1,20 @@
 //! Scan lifecycle commands: start/pause/resume/cancel/query. Progress is
 //! delivered through the `scan://progress` event channel only.
 
-use crate::domain::types::{AnalyzerRun, Issue, ScanRun, ScanStatus};
+#[cfg(feature = "desktop")]
+use crate::domain::types::AnalyzerRun;
+use crate::domain::types::{Issue, ScanRun, ScanStatus};
 use crate::error::AppError;
 use crate::rules::config::RULE_VERSION;
 use crate::rules::config::RuleConfig;
+use crate::scan::events::EventSink;
 use crate::scan::job::{JobHandle, run_scan_job};
 use crate::scan::{ScanParams, ScanRunSummary, new_run_id, now_millis};
 use crate::state::AppState;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Emitter, State};
 
 static SCAN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -102,6 +106,7 @@ fn scan_configuration(
     Ok((config, analyzers, recorded))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn start_scan(
     state: State<AppState>,
@@ -110,15 +115,23 @@ pub fn start_scan(
     config: Option<serde_json::Value>,
     analyzers: Option<Vec<String>>,
 ) -> Result<ScanRunSummary, AppError> {
-    start_scan_state(&state, app, project_id, config, analyzers)
+    start_scan_state(
+        &state,
+        project_id,
+        config,
+        analyzers,
+        Box::new(move |event| {
+            let _ = app.emit("scan://progress", event);
+        }),
+    )
 }
 
 pub fn start_scan_state(
     state: &AppState,
-    app: AppHandle,
     project_id: String,
     config: Option<serde_json::Value>,
     analyzers: Option<Vec<String>>,
+    sink: EventSink,
 ) -> Result<ScanRunSummary, AppError> {
     let root = state.project_path(&project_id)?;
     let run_id = new_run_id(SCAN_SEQUENCE.fetch_add(1, Ordering::Relaxed));
@@ -158,9 +171,6 @@ pub fn start_scan_state(
         enabled_analyzers,
         workspace: state.scan_work_root.as_ref().map(|path| path.join(&run_id)),
     };
-    let sink: crate::scan::events::EventSink = Box::new(move |event| {
-        let _ = app.emit("scan://progress", event);
-    });
     jobs.insert(run_id.clone(), handle.clone());
     let active_jobs = Arc::clone(&state.jobs);
     if std::thread::Builder::new()
@@ -189,6 +199,7 @@ pub fn start_scan_state(
     Ok(summary_of(run))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn pause_scan(state: State<AppState>, run_id: String) -> Result<(), AppError> {
     pause_scan_state(&state, &run_id)
@@ -198,6 +209,7 @@ pub fn pause_scan_state(state: &AppState, run_id: &str) -> Result<(), AppError> 
     control_scan(state, run_id, ScanStatus::Paused)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn resume_scan(state: State<AppState>, run_id: String) -> Result<(), AppError> {
     resume_scan_state(&state, &run_id)
@@ -207,6 +219,7 @@ pub fn resume_scan_state(state: &AppState, run_id: &str) -> Result<(), AppError>
     control_scan(state, run_id, ScanStatus::Running)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn cancel_scan(state: State<AppState>, run_id: String) -> Result<(), AppError> {
     cancel_scan_state(&state, &run_id)
@@ -270,6 +283,7 @@ fn control_scan(state: &AppState, run_id: &str, next: ScanStatus) -> Result<(), 
     Ok(())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn get_scan(state: State<AppState>, run_id: String) -> Result<ScanRunSummary, AppError> {
     get_scan_state(&state, &run_id)
@@ -283,6 +297,7 @@ pub fn get_scan_state(state: &AppState, run_id: &str) -> Result<ScanRunSummary, 
         .ok_or_else(|| AppError::Validation("scan run does not exist".to_owned()))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_analyzer_runs(
     state: State<AppState>,
@@ -298,6 +313,7 @@ pub struct IssuePage {
     pub total: i64,
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_issues(
     state: State<AppState>,

@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import ArchitectureView from "./ArchitectureView";
 import IssuesView from "./IssuesView";
 import SettingsView from "./SettingsView";
+import Updates from "./Updates";
 import type {
   HistoryDiff,
   AnalyzerRun,
@@ -434,6 +435,7 @@ export default function App() {
         setSettings(next);
         setNotice("设置已保存，扫描阈值将在下一次扫描使用。");
       }} />}
+      <Updates visible={page === "settings"} scanActive={taskRunning} />
     </main>
   </div>;
 }
@@ -734,7 +736,7 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
             <option value="">选择报告快照</option>{completedRuns.map((item) => <option key={item.id} value={item.id}>{scanLabel(item)}</option>)}
           </select>
           <select aria-label="报告格式" value={format} disabled={busy} onChange={(event) => setFormat(event.target.value as ReportFormat)}>
-            <option value="json">JSON</option><option value="markdown">Markdown</option><option value="txt">TXT</option><option value="html">HTML</option>
+            <option value="json">JSON</option><option value="markdown">Markdown</option><option value="txt">TXT</option><option value="html">HTML</option><option value="sarif">SARIF</option>
           </select>
           <input aria-label="报告保存路径" value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="报告保存路径" />
           <button className="button button--quiet" disabled={busy || !reportRunId} onClick={onChooseDestination}>选择保存位置</button>

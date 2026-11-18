@@ -8,8 +8,11 @@ if (!root || !/^\d+\.\d+\.\d+$/.test(version ?? "")) {
   throw new Error("Usage: node scripts/release/assets.mjs <directory> <version>");
 }
 const names = (await readdir(root)).filter((name) => name !== "SHA256SUMS.txt").sort();
-const required = [`CodeDoctor_${version}_x64-setup.exe`, `CodeDoctor_${version}_x64_en-US.msi`, "codedoctor.exe"];
-if (required.some((name) => !names.includes(name))) throw new Error("A Windows release asset is missing");
+const nsis = `CodeDoctor_${version}_x64-setup.exe`;
+const msi = `CodeDoctor_${version}_x64_en-US.msi`;
+const required = [nsis, msi, `${nsis}.sig`, `${msi}.sig`, "codedoctor.exe", "latest.json",
+  "THIRD-PARTY-NOTICES-Windows.txt", `CodeDoctor_${version}_linux_x64-cli.tar.gz`].sort();
+if (JSON.stringify(names) !== JSON.stringify(required)) throw new Error("Release assets do not match the expected inventory");
 
 const assets = [];
 for (const name of names) {

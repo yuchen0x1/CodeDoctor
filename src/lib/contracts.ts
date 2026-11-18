@@ -209,7 +209,7 @@ export interface IssuePage {
   total: number;
 }
 
-export type ReportFormat = "json" | "markdown" | "txt" | "html";
+export type ReportFormat = "json" | "markdown" | "txt" | "html" | "sarif";
 
 export interface ReportResult {
   score: ScoreSnapshot;

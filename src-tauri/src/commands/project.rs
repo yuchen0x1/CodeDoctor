@@ -7,6 +7,7 @@ use crate::index::{IndexSummary, index_directory};
 use crate::state::AppState;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Manager, State};
 
 fn now() -> String {
@@ -16,6 +17,7 @@ fn now() -> String {
         .unwrap_or_else(|_| "0".to_owned())
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn import_project(app: AppHandle, path: String) -> Result<ProjectSummary, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -54,11 +56,13 @@ pub fn import_project_state(state: &AppState, path: String) -> Result<ProjectSum
     Ok(summary)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn list_projects(state: State<AppState>) -> Result<Vec<ProjectRecord>, AppError> {
     state.storage()?.list_projects()
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn restore_project(
     app: AppHandle,
@@ -71,6 +75,7 @@ pub async fn restore_project(
     .map_err(|_| AppError::Validation("project restore worker exited".to_owned()))?
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn restore_project_state(state: &AppState, project_id: &str) -> Result<ProjectSummary, AppError> {
     let project = state
         .storage()?
@@ -105,6 +110,7 @@ fn restore_project_state(state: &AppState, project_id: &str) -> Result<ProjectSu
     Ok(summary)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn index_project(app: AppHandle, project_id: String) -> Result<IndexSummary, AppError> {
     tauri::async_runtime::spawn_blocking(move || {

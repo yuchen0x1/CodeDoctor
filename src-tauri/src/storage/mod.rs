@@ -355,6 +355,7 @@ pub struct IssueDiff {
     pub current_severity: Option<Severity>,
 }
 
+#[cfg(any(feature = "desktop", test))]
 pub(crate) struct IssueLocation {
     pub file_path: String,
     pub start_line: u32,
@@ -381,6 +382,16 @@ impl Storage {
 
     pub fn in_memory() -> Result<Self, AppError> {
         Self::new(Connection::open_in_memory()?)
+    }
+
+    #[cfg(all(windows, feature = "desktop"))]
+    pub fn backup(&self, destination: &std::path::Path) -> Result<(), AppError> {
+        self.conn.backup(
+            rusqlite::MAIN_DB,
+            destination,
+            rusqlite::backup::NO_PROGRESS,
+        )?;
+        Ok(())
     }
 
     fn new(mut conn: Connection) -> Result<Self, AppError> {
@@ -566,6 +577,7 @@ impl Storage {
             .map_err(AppError::from)
     }
 
+    #[cfg(any(feature = "desktop", test))]
     pub(crate) fn get_issue_location(
         &self,
         run_id: &str,

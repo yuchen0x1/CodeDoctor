@@ -338,6 +338,14 @@ body {
 .severity--info { color: #cbd5e1; background: rgba(148,163,184,.14); }
 .dashboard-detail { max-width: none; }
 .current-file, .hero p, .topbar__subtitle, .section-heading .muted { overflow-wrap: anywhere; }
+
+.update-settings { margin-top: 16px; }
+.update-settings > .muted { margin: 0; }
+.update-dialog { width: min(580px, calc(100vw - 48px)); color: var(--color-text); }
+.update-dialog::backdrop { background: rgba(2, 9, 18, .68); }
+.update-notes { max-height: 40vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.55; }
+.update-progress { display: grid; gap: 8px; margin: 16px 0; }
+.update-progress progress { width: 100%; accent-color: var(--color-accent); }
 .saved-project-select, .prompt-controls label, .prompt-target > label { display: grid; gap: 5px; color: var(--color-text-muted); }
 .saved-project-select { margin-top: 12px; }
 .recent-runs, .score-trend { display: grid; gap: 7px; margin: 12px 0 0; padding: 0; list-style: none; }

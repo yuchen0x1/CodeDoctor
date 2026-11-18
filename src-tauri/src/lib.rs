@@ -8,6 +8,7 @@ pub mod history;
 pub mod import;
 pub mod index;
 pub mod parse;
+#[cfg(any(feature = "desktop", test))]
 pub mod prompt;
 pub mod report;
 pub mod rules;
@@ -15,21 +16,30 @@ pub mod scan;
 pub mod score;
 pub mod state;
 pub mod storage;
+#[cfg(all(windows, feature = "desktop"))]
+mod update;
 
+#[cfg(feature = "desktop")]
 use state::AppState;
 
 /// Liveness probe for the Rust core.
 ///
 /// The frontend calls this on startup to prove the command bridge works before
 /// any scanning feature depends on it.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 fn health() -> &'static str {
     "ok"
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(feature = "desktop")]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(windows)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::UpdateState::default());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             use tauri::Manager;
@@ -65,7 +75,13 @@ pub fn run() {
             commands::report::export_report,
             commands::architecture::get_architecture_graph,
             commands::history::compare_scan_history,
-            commands::history::list_scan_runs
+            commands::history::list_scan_runs,
+            #[cfg(windows)]
+            update::check_for_update,
+            #[cfg(windows)]
+            update::install_update,
+            #[cfg(windows)]
+            update::open_release_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

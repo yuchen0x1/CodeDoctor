@@ -38,3 +38,17 @@ jobs:
       - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
         with:
           fail-on-severity: high
+  linux:
+    name: Linux CLI checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install 1.99.1 --profile minimal --component clippy
+      - run: rustup override set 1.99.1
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --no-default-features --features cli --all-targets
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --features cli
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked --no-default-features --features cli --bin codedoctor-cli
+      - run: node scripts/validation/cli-smoke.mjs src-tauri/target/debug/codedoctor-cli
