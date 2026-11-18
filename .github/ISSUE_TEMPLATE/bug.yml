@@ -1,0 +1,28 @@
+name: 问题报告
+description: 报告分析结果、界面、兼容性、安装或更新问题
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题类型
+      options:
+        - 扫描、分析或报告
+        - 界面与交互
+        - 平台兼容性
+        - 安装、卸载或更新
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: 版本、操作系统、架构、安装包类型
+      placeholder: 例如 CodeDoctor 0.1.1，Windows 11 x64，NSIS
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤、预期结果和实际结果
+      description: 提供小型公开样例或已清理的错误信息。安全问题使用私密报告。
+    validations:
+      required: true

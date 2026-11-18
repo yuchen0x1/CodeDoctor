@@ -1,0 +1,23 @@
+name: Dependency security
+on:
+  schedule:
+    - cron: '29 2 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - run: pnpm audit --prod
+      - name: Full npm advisory inventory
+        continue-on-error: true
+        run: pnpm audit
+      - run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: Audit Windows Rust dependencies
+        run: cargo audit --file src-tauri/Cargo.lock --target-arch x86_64 --target-os windows
