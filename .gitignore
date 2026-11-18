@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+target
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.sw?
+*.local
+
+# Tauri generated files
+src-tauri/gen/schemas
+src-tauri/target
+
+# Test artifacts
+coverage
+playwright-report
+test-results

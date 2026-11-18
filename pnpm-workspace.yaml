@@ -1,0 +1,6 @@
+# pnpm requires explicit approval before running dependency install scripts.
+# Vite/vitest need esbuild's postinstall to place its native binary, so it is
+# approved here for every install in this workspace.
+allowBuilds:
+  esbuild: true
+

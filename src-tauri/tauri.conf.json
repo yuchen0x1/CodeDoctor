@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CodeDoctor",
+  "version": "0.1.0",
+  "identifier": "com.codedoctor.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CodeDoctor",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.local; img-src 'self' asset: http://asset.local data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "publisher": "CodeDoctor",
+    "copyright": "Copyright 2026 CodeDoctor",
+    "category": "DeveloperTool",
+    "shortDescription": "Offline code quality inspection and governance",
+    "longDescription": "CodeDoctor performs local, read-only code quality analysis with evidence-backed reports and governance prompts.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": true,
+        "startMenuFolder": "CodeDoctor"
+      }
+    }
+  }
+}
