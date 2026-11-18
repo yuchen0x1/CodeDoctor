@@ -47,6 +47,7 @@ pub struct ProjectSummary {
     pub project_id: String,
     pub canonical_path: String,
     pub display_name: String,
+    pub source_available: bool,
     pub languages: Vec<String>,
     pub frameworks: Vec<String>,
     pub config_files: Vec<String>,
@@ -141,6 +142,7 @@ fn summary_from_index(root: &Path, index: IndexSummary) -> ProjectSummary {
     ProjectSummary {
         project_id,
         canonical_path,
+        source_available: true,
         display_name: root
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())

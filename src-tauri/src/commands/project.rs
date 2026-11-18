@@ -74,10 +74,23 @@ pub async fn restore_project(
 fn restore_project_state(state: &AppState, project_id: &str) -> Result<ProjectSummary, AppError> {
     let project = state
         .storage()?
-        .list_projects()?
-        .into_iter()
-        .find(|project| project.id == project_id)
+        .get_project(project_id)?
         .ok_or_else(|| AppError::Validation("project does not exist".into()))?;
+    if !std::path::Path::new(&project.normalized_path).try_exists()? {
+        return Ok(ProjectSummary {
+            project_id: project.id,
+            canonical_path: project.normalized_path,
+            display_name: project.name,
+            source_available: false,
+            languages: Vec::new(),
+            frameworks: Vec::new(),
+            config_files: Vec::new(),
+            file_count: 0,
+            source_file_count: 0,
+            line_count: 0,
+            max_directory_depth: 0,
+        });
+    }
     let summary = import_project_path(&project.normalized_path)?;
     if summary.project_id != project.id {
         return Err(AppError::Validation(
@@ -188,9 +201,25 @@ mod tests {
         let restored = restore_project_state(&restarted, &project_id).unwrap();
 
         assert_eq!(restored.project_id, project_id);
+        assert!(restored.source_available);
         assert!(index_project_state(&restarted, project_id.clone()).is_ok());
         assert!(import_project_state(&restarted, project_path).is_ok());
         let _ = fs::remove_file(database);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restores_saved_project_identity_when_source_is_missing() {
+        let state = AppState::in_memory().unwrap();
+        let root = temp_root("missing-source");
+        fs::create_dir(&root).unwrap();
+        let imported = import_project_state(&state, root.to_string_lossy().into_owned()).unwrap();
+        fs::remove_dir(&root).unwrap();
+
+        let restored = restore_project_state(&state, &imported.project_id).unwrap();
+        assert_eq!(restored.project_id, imported.project_id);
+        assert_eq!(restored.canonical_path, imported.canonical_path);
+        assert_eq!(restored.display_name, imported.display_name);
+        assert!(!restored.source_available);
     }
 }

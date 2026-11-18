@@ -265,7 +265,7 @@ export default function App() {
   };
 
   const scanIt = async (retry?: ScanRun) => {
-    if (!project || busy || taskRunning) return;
+    if (!project?.sourceAvailable || busy || taskRunning) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const config = retry?.config ?? {
@@ -415,7 +415,7 @@ export default function App() {
       {notice && <div className="alert alert--success" role="status">{notice}<button onClick={() => setNotice("")}>关闭</button></div>}
       {page === "overview" && <Overview project={project} savedProjects={savedProjects} runs={historyRuns} issues={issues} score={score} busy={busy || taskRunning} onImport={() => setPage("inspection")} onIssues={() => setPage("issues")} onRestore={restoreSavedProject} onViewRun={openHistoryRun} />}
       {page === "inspection" && <Inspection project={project} path={path} setPath={setPath} busy={busy || taskRunning} onImport={importIt} onPickDirectory={() => importSelectedPath(pickProjectDirectory)} onPickArchive={() => importSelectedPath(pickProjectArchive)} onScan={() => void scanIt()} />}
-      {page === "scans" && <Scans run={run} event={event} status={status} analyzers={analyzerRuns} onPause={() => void controlScan(pauseScan)} onResume={() => void controlScan(resumeScan)} onCancel={() => void controlScan(cancelScan)} onIssues={() => setPage("issues")} onRetry={() => void scanIt(run?.run)} />}
+      {page === "scans" && <Scans run={run} event={event} status={status} analyzers={analyzerRuns} canRetry={project?.sourceAvailable === true} onPause={() => void controlScan(pauseScan)} onResume={() => void controlScan(resumeScan)} onCancel={() => void controlScan(cancelScan)} onIssues={() => setPage("issues")} onRetry={() => void scanIt(run?.run)} />}
       {page === "issues" && <div className="page-stack"><IssuesView key={runId} issues={issues} projectRoot={project?.canonicalPath || ""} loadCodeContext={runId ? (issue) => readIssueSource(runId, issue.id) : undefined}
         onOpenLocation={runId ? (issue) => openIssueSource(runId, issue.id) : undefined} onExport={runStatus === "completed" ? saveIssues : undefined} /></div>}
       {page === "architecture" && <div className="page-stack"><ArchitectureView projectId={project?.projectId || ""} runId={run?.run.status === "completed" ? run.run.id : null} /></div>}
@@ -539,22 +539,25 @@ function Inspection({ project, path, setPath, busy, onImport, onPickDirectory, o
     {project && <section className="panel panel--large dashboard-detail">
       <div className="section-heading">
         <div><h3>{project.displayName}</h3><p className="muted">{displayPath(project.canonicalPath)}</p></div>
-        <button className="button button--primary" onClick={onScan} disabled={busy}>开始全面扫描</button>
+        {project.sourceAvailable && <button className="button button--primary" onClick={onScan} disabled={busy}>开始全面扫描</button>}
       </div>
-      <div className="stat-grid stat-grid--compact">
-        <Stat label="文件" value={project.fileCount} hint={project.sourceFileCount + " 个源码文件"} />
-        <Stat label="代码行" value={number(project.lineCount)} hint={"目录深度 " + project.maxDirectoryDepth} />
-        <Stat label="语言" value={project.languages.join("、") || "待识别"} hint="扩展名与项目清单" />
-        <Stat label="框架" value={project.frameworks.join("、") || "未识别"} hint="配置文件证据" />
-      </div>
-      {!!project.configFiles?.length && <details className="project-configs"><summary>配置文件（{project.configFiles.length}）</summary>
-        <ul>{project.configFiles.map((file) => <li key={file}><code>{file}</code></li>)}</ul>
-      </details>}
+      {project.sourceAvailable ? <>
+        <div className="stat-grid stat-grid--compact">
+          <Stat label="文件" value={project.fileCount} hint={project.sourceFileCount + " 个源码文件"} />
+          <Stat label="代码行" value={number(project.lineCount)} hint={"目录深度 " + project.maxDirectoryDepth} />
+          <Stat label="语言" value={project.languages.join("、") || "待识别"} hint="扩展名与项目清单" />
+          <Stat label="框架" value={project.frameworks.join("、") || "未识别"} hint="配置文件证据" />
+        </div>
+        {!!project.configFiles?.length && <details className="project-configs"><summary>配置文件（{project.configFiles.length}）</summary>
+          <ul>{project.configFiles.map((file) => <li key={file}><code>{file}</code></li>)}</ul>
+        </details>}
+      </> : <p className="muted">原始路径已失效，仍可查看历史报告。重新扫描前，请导入可用的文件夹或 ZIP。</p>}
     </section>}
   </div>;
 }
 
-function Scans({ run, event, status, analyzers, onPause, onResume, onCancel, onIssues, onRetry }: {
+function Scans({ run, event, status, analyzers, canRetry, onPause, onResume, onCancel, onIssues, onRetry }: {
+  canRetry: boolean;
   run: ScanRunSummary | null;
   event: ScanEvent | null;
   status: ScanRun["status"];
@@ -592,7 +595,7 @@ function Scans({ run, event, status, analyzers, onPause, onResume, onCancel, onI
           <button className="button button--quiet" disabled={!canPause} onClick={status === "paused" ? onResume : onPause}>{status === "paused" ? "继续扫描" : "暂停扫描"}</button>
           <button className="button button--danger" disabled={!canCancel} onClick={onCancel}>取消扫描</button>
           {status === "completed" && <button className="button button--primary" onClick={onIssues}>打开问题</button>}
-          {(status === "failed" || status === "canceled") && <button className="button button--primary" onClick={onRetry}>按原设置重新扫描</button>}
+          {(status === "failed" || status === "canceled") && <button className="button button--primary" disabled={!canRetry} onClick={onRetry}>按原设置重新扫描</button>}
         </div>
       </> : <Empty title="还没有扫描任务" text="在项目体检页开始扫描。" />}
     </section>

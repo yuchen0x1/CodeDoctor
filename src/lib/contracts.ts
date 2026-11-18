@@ -163,6 +163,7 @@ export interface PromptArtifact {
 }
 
 export interface ProjectSummary {
+  sourceAvailable: boolean;
   projectId: string;
   canonicalPath: string;
   displayName: string;
