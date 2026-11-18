@@ -1,0 +1,6 @@
+changelog:
+  categories:
+    - title: 安全与依赖
+      labels: [security, dependencies]
+    - title: 功能与修复
+      labels: ["*"]

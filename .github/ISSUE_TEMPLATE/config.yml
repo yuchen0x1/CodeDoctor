@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私密安全报告
+    url: https://github.com/yuchen0x1/CodeDoctor/security/advisories/new
+    about: 在私密渠道报告漏洞和安全相关信息

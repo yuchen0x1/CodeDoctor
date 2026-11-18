@@ -60,3 +60,9 @@ Rust 依赖缓存可通过 `CARGO_HOME` 指向本机缓存目录；项目不需�
 ## 语言覆盖
 
 详见 [语言能力矩阵](docs/language-capability-matrix.md)。分析器行为详见 [本机分析器](docs/analyzers.md)，隐私和数据边界详见 [隐私说明](docs/privacy.md)。
+
+## 贡献与下载
+
+[下载正式版](https://github.com/yuchen0x1/CodeDoctor/releases/latest) · [问题反馈](https://github.com/yuchen0x1/CodeDoctor/issues/new/choose) · [贡献指南](CONTRIBUTING.md) · [安全报告](SECURITY.md) · [MIT 许可证](LICENSE)
+
+[架构与基线](docs/engineering/baseline.md) · [平台评估](docs/engineering/platforms.md) · [维护和发布](docs/engineering/maintenance.md)
