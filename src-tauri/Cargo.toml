@@ -1,6 +1,6 @@
 [package]
 name = "codedoctor"
-version = "0.2.2"
+version = "0.2.3"
 description = "CodeDoctor offline code-quality inspection desktop app"
 authors = ["CodeDoctor"]
 edition = "2024"

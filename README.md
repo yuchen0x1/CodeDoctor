@@ -7,6 +7,12 @@ CodeDoctor 是离线优先的代码质量体检工具。Windows 桌面工作台�
 
 ## 最新更新
 
+### 0.2.3（2026-11-21）
+
+- SARIF 为每条结果提供与规则表一致的索引；不再把未知行号写为第 1 行，也不会生成空指纹。
+- 历史报告打开保存对话框时锁定导出控件，避免误用旧路径；取消后保留原路径。
+- CLI 冒烟测试增加规则索引、相对文件路径和扫描行号的检查。
+
 ### 0.2.2（2026-11-21）
 
 - 修复 Windows 安装升级验证的启动竞态，确认旧库就绪、新版恢复扫描及历史数据保留。
@@ -27,8 +33,8 @@ CodeDoctor 是离线优先的代码质量体检工具。Windows 桌面工作台�
 
 | 产物 | 用法 |
 | --- | --- |
-| `bundle/nsis/CodeDoctor_0.2.2_x64-setup.exe` | 双击，按向导完成当前用户安装 |
-| `bundle/msi/CodeDoctor_0.2.2_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
+| `bundle/nsis/CodeDoctor_0.2.3_x64-setup.exe` | 双击，按向导完成当前用户安装 |
+| `bundle/msi/CodeDoctor_0.2.3_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
 | `codedoctor.exe` | 直接运行，免安装 |
 
 应用需要 Microsoft Edge WebView2 Runtime。免安装版也使用当前用户的本地扫描数据库，详情见[隐私与数据边界](docs/privacy.md)。

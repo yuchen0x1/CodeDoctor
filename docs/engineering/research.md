@@ -124,3 +124,18 @@
 | 33 | 集中托管服务 | SonarQube | D / 高 | 改变隐私边界 |
 
 平台适配见 [平台评估](platforms.md)。按 [维护流程](maintenance.md) 的周期复查版本、社区问题和许可证。上述第三方代码均作为参考。
+
+## 2026-11-21：报告交付复查
+
+本轮复查了桌面与 CLI 共享的 Rust 扫描入口和报告渲染器、React 历史页、SQLite 快照及迁移和 GitHub Actions 发布门禁。对照下列上游文档；没有复制第三方代码，也没有引入新的运行时依赖。没有使用相同数据集做跨工具跑分，不能据此判断绝对性能。
+
+| 维度 | CodeDoctor 当前行为 | 上游参考（许可证） | 取舍 |
+| --- | --- | --- | --- |
+| 功能 / 交付 | Windows 工作台与无 GUI 的 Linux CLI 共用 Rust 规则和报告 | [Cppcheck 手册](https://github.com/cppcheck-opensource/cppcheck/blob/main/man/manual.md)（GPL-3.0），GUI 和 CLI 共用分析，提供项目配置与机器报告 | 保留桌面审阅与 CLI 自动化分工 |
+| 互操作 / 性能 | 规则表和诊断由同一个 SARIF 渲染器导出；扫描已有文件规则缓存 | [PMD CLI](https://github.com/pmd/pmd/blob/main/docs/pages/pmd/userdocs/cli_reference.md)（[BSD 风格及部分 Apache-2.0](https://github.com/pmd/pmd/blob/main/docs/pages/license.md)），独立渲染格式及增量分析 | 本轮锁定规则索引、路径和行号契约；性能变更先做基准 |
+| UI / 数据 | SQLite 保留历史并支持比较；保存对话框异步返回 | [SpotBugs GUI](https://github.com/spotbugs/spotbugs/blob/master/docs/gui.rst)（LGPL-2.1），分析结果可独立保存和重开 | 导出动作绑定已选快照和格式，等待选择时锁定控件 |
+| 安全 / 扩展 | 默认内置离线规则；Ruff 是显式启用的本机适配器 | [Ruff 规则与修复](https://docs.astral.sh/ruff/linter/)（MIT），按稳定规则 ID 管理诊断，区分安全与非安全修复 | 保留规则身份，不引入自动改写或执行被扫描项目配置 |
+| 架构 | Tauri IPC 和 CLI 共用问题模型；前端负责交互 | [Biome](https://github.com/biomejs/biome#readme)（MIT 或 Apache-2.0），CLI 与编辑器集成共用诊断引擎 | 在共享渲染器修复，不在各终端重复转换 |
+| 工程 / 缓存 | 无用户可执行插件系统；结果和配置有回归测试 | [ESLint CLI](https://eslint.org/docs/latest/use/command-line-interface)（MIT），格式器、缓存和 dry-run 有明确边界 | 未来扩展优先声明式配置，先验证缓存失效和隔离 |
+
+升级队列：**P0** 持续验证签名更新与安装后 SQLite 恢复，本轮没有确认阻止交付的数据损坏；**P1** 修复报告规则索引、缺失证据和保存交互，并在 CLI CI 锁定契约；**P2** 用包含非 ASCII 字符的样本设计字符列转换，并为大量历史差异增加分页及可比较基准；**P3** 评估可审计的问题忽略、规则元数据和模块约束，维持离线默认。

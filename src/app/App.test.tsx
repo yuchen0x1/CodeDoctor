@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryDiff, Issue, ProjectRecord, ProjectSummary, ReportResult, ScanRun } from "../lib/contracts";
 import * as bridge from "../lib/tauri";
-import { pickProjectDirectory } from "../lib/nativeDialogs";
+import { pickProjectDirectory, pickReportDestination } from "../lib/nativeDialogs";
 import App from "./App";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false }));
@@ -154,6 +154,48 @@ describe("project restoration", () => {
 });
 
 describe("history selections", () => {
+  it.each(["cancel", "accept"])("locks the report controls during the picker and handles %s", async (outcome) => {
+    const pending = deferred<string | null>();
+    vi.mocked(pickReportDestination).mockResolvedValueOnce("C:/old.sarif").mockReturnValueOnce(pending.promise);
+    await mount();
+    await click("历史报告");
+    await choose("报告格式", "sarif");
+    await click("选择保存位置");
+    await click("选择保存位置");
+    expect(pickReportDestination).toHaveBeenLastCalledWith("sarif");
+    const path = container.querySelector<HTMLInputElement>('input[aria-label="报告保存路径"]')!;
+    expect(path.disabled).toBe(true);
+    expect(select("报告格式").disabled).toBe(true);
+    expect(select("报告快照").disabled).toBe(true);
+    expect(button("选择保存位置").disabled).toBe(true);
+    expect(button("导出报告").disabled).toBe(true);
+    await click("导出报告");
+    expect(bridge.exportReport).not.toHaveBeenCalled();
+    const selectedPath = outcome === "accept" ? "C:/new.sarif" : null;
+    await act(async () => pending.resolve(selectedPath));
+    expect(path.disabled).toBe(false);
+    expect(path.value).toBe(selectedPath ?? "C:/old.sarif");
+    await click("导出报告");
+    expect(bridge.exportReport).toHaveBeenCalledWith("scan-3", "sarif", selectedPath ?? "C:/old.sarif");
+  });
+
+  it("ignores a report destination returned after switching projects", async () => {
+    const pending = deferred<string | null>();
+    vi.mocked(pickReportDestination).mockReturnValue(pending.promise);
+    await mount();
+    await click("历史报告");
+    await click("选择保存位置");
+    await click("项目体检");
+    await click("选择项目文件夹");
+    await act(async () => pending.resolve("C:/project-a.md"));
+    await click("历史报告");
+    const path = container.querySelector<HTMLInputElement>('input[aria-label="报告保存路径"]')!;
+    expect(path.value).toBe("");
+    expect(path.disabled).toBe(false);
+    expect(button("导出报告").disabled).toBe(true);
+    expect(bridge.exportReport).not.toHaveBeenCalled();
+  });
+
   it("keeps chosen snapshots when delayed score loading refreshes history and exports the chosen snapshot", async () => {
     const score = deferred<ReportResult>();
     vi.mocked(bridge.calculateReport).mockReturnValue(score.promise);

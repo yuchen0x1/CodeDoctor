@@ -137,6 +137,7 @@ export default function App() {
   const [path, setPath] = useState("");
   const [reportFormat, setReportFormat] = useState<ReportFormat>("markdown");
   const [reportDestination, setReportDestination] = useState("");
+  const [choosingReportPath, setChoosingReportPath] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -457,10 +458,17 @@ export default function App() {
   };
 
   const chooseReportPath = async () => {
+    const request = projectRequest.current;
+    setChoosingReportPath(true);
+    setError("");
     try {
       const selectedPath = await pickReportDestination(reportFormat);
-      if (selectedPath) setReportDestination(selectedPath);
-    } catch (reason) { setError(safeError(reason)); }
+      if (selectedPath && projectRequest.current === request) setReportDestination(selectedPath);
+    } catch (reason) {
+      if (projectRequest.current === request) setError(safeError(reason));
+    } finally {
+      setChoosingReportPath(false);
+    }
   };
 
   useEffect(() => {
@@ -523,7 +531,7 @@ export default function App() {
         onCopy={copyPrompt} onExport={savePrompt} />}
       {page === "history" && <History project={project} runs={historyRuns} baseRunId={baseRunId} targetRunId={targetRunId} reportRunId={reportRunId}
         setBaseRunId={(value) => { historyRequest.current += 1; setBaseRunId(value); setHistoryDiff(null); }} setTargetRunId={(value) => { historyRequest.current += 1; setTargetRunId(value); setHistoryDiff(null); }}
-        setReportRunId={setReportRunId} diff={historyDiff?.baseRunId === baseRunId && historyDiff.targetRunId === targetRunId ? historyDiff : null} issueDetails={historyIssueDetails} busy={busy} onCompare={compareHistory} format={reportFormat}
+        setReportRunId={setReportRunId} diff={historyDiff?.baseRunId === baseRunId && historyDiff.targetRunId === targetRunId ? historyDiff : null} issueDetails={historyIssueDetails} busy={busy || choosingReportPath} onCompare={compareHistory} format={reportFormat}
         setFormat={(value) => { setReportFormat(value); setReportDestination(""); }} destination={reportDestination} setDestination={setReportDestination} onChooseDestination={chooseReportPath} onExport={exportCurrentReport} />}
       {page === "settings" && <SettingsView settings={settings} onSave={(next: AppSettings) => {
         writeSettings(next);
@@ -841,7 +849,7 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
           <select aria-label="报告格式" value={format} disabled={busy} onChange={(event) => setFormat(event.target.value as ReportFormat)}>
             <option value="json">JSON</option><option value="markdown">Markdown</option><option value="txt">TXT</option><option value="html">HTML</option><option value="sarif">SARIF</option>
           </select>
-          <input aria-label="报告保存路径" value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="报告保存路径" />
+          <input aria-label="报告保存路径" value={destination} disabled={busy} onChange={(event) => setDestination(event.target.value)} placeholder="报告保存路径" />
           <button className="button button--quiet" disabled={busy || !reportRunId} onClick={onChooseDestination}>选择保存位置</button>
           <button className="button button--primary" disabled={!reportRunId || !destination.trim() || busy} onClick={onExport}>导出报告</button>
         </div>
