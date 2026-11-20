@@ -78,18 +78,54 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     fn tempdir() -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "codedoctor-zip-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_dir_all(&path);
-        std::fs::create_dir_all(&path).unwrap();
-        path
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        tempdir_at(timestamp)
     }
+
+    fn tempdir_at(timestamp: u128) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+        loop {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "codedoctor-zip-test-{}-{timestamp}-{id}",
+                std::process::id(),
+            ));
+            // Reserve a fresh directory without deleting another test's files.
+            match std::fs::create_dir(&path) {
+                Ok(()) => return path,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => panic!("could not create ZIP test directory: {error}"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_tempdirs_with_same_timestamp_are_isolated() {
+        let first = tempdir_at(0);
+        let archive = first.join("crc.zip");
+        let mut bytes = stored_zip(&[("data.txt", b"correct")]);
+        bytes[30 + "data.txt".len()] ^= 1;
+        std::fs::write(&archive, bytes).unwrap();
+
+        let second = tempdir_at(0);
+        let result = extract_zip(&archive);
+        let isolated = first != second && archive.is_file();
+
+        std::fs::remove_dir_all(&first).unwrap();
+        if first != second {
+            std::fs::remove_dir_all(second).unwrap();
+        }
+        assert!(
+            isolated && matches!(&result, Err(AppError::Zip(_))),
+            "same-timestamp test directories must preserve the first archive; got {result:?}"
+        );
+    }
+
     fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
         zip_fixture(entries, false, false)
     }
@@ -223,7 +259,12 @@ mod tests {
         let mut bytes = stored_zip(&[("data.txt", b"correct")]);
         bytes[30 + "data.txt".len()] ^= 1;
         fs::write(&archive, bytes).unwrap();
-        assert!(matches!(extract_zip(&archive), Err(AppError::Zip(_))));
+        let result = extract_zip(&archive);
+        fs::remove_dir_all(root).unwrap();
+        assert!(
+            matches!(result, Err(AppError::Zip(_))),
+            "expected corrupt stored content to be rejected as a ZIP error, got {result:?}"
+        );
     }
 
     #[test]
@@ -318,31 +359,42 @@ mod tests {
 
     #[test]
     fn failed_extraction_removes_temporary_directory() {
-        let root = tempdir();
-        let archive = root.join("corrupt-second-entry.zip");
-        let mut bytes = stored_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
-        let second_header = 30 + "first.txt".len() + b"first".len();
-        let name_len = u16::from_le_bytes(
-            bytes[second_header + 26..second_header + 28]
-                .try_into()
-                .unwrap(),
-        ) as usize;
-        let extra_len = u16::from_le_bytes(
-            bytes[second_header + 28..second_header + 30]
-                .try_into()
-                .unwrap(),
-        ) as usize;
-        bytes[second_header + 30 + name_len + extra_len] ^= 1;
-        std::fs::write(&archive, bytes).unwrap();
+        for deflated in [false, true] {
+            for descriptor in [false, true] {
+                let root = tempdir();
+                let archive = root.join("corrupt-second-entry.zip");
+                let mut bytes = zip_fixture(
+                    &[("first.txt", b"first"), ("second.txt", b"second")],
+                    deflated,
+                    descriptor,
+                );
+                // Both supported methods must pass CRC validation, including when
+                // sizes and checksums are supplied through a data descriptor.
+                let second_header = 30
+                    + "first.txt".len()
+                    + b"first".len()
+                    + if deflated { 5 } else { 0 }
+                    + if descriptor { 16 } else { 0 };
+                let second_content = second_header + 30 + "second.txt".len();
+                bytes[second_content + if deflated { 5 } else { 0 }] ^= 1;
+                std::fs::write(&archive, bytes).unwrap();
 
-        let extraction_base = root.join("extraction-root");
-        std::fs::create_dir_all(&extraction_base).unwrap();
-        let before = std::fs::read_dir(&extraction_base).unwrap().count();
-        let result = extract_zip_with_root(&archive, || unique_temp_dir_in(&extraction_base));
-        assert!(matches!(result, Err(AppError::Zip(_))));
-        let after = std::fs::read_dir(&extraction_base).unwrap().count();
-        assert_eq!(before, after);
-        std::fs::remove_dir_all(root).unwrap();
+                let extraction_base = root.join("extraction-root");
+                std::fs::create_dir_all(&extraction_base).unwrap();
+                let result =
+                    extract_zip_with_root(&archive, || unique_temp_dir_in(&extraction_base));
+                let remaining = std::fs::read_dir(&extraction_base).unwrap().count();
+                std::fs::remove_dir_all(root).unwrap();
+                assert!(
+                    matches!(result, Err(AppError::Zip(_))),
+                    "expected a ZIP error for deflated={deflated}, descriptor={descriptor}; got {result:?}"
+                );
+                assert_eq!(
+                    remaining, 0,
+                    "failed extraction left files for deflated={deflated}, descriptor={descriptor}"
+                );
+            }
+        }
     }
 
     #[test]
