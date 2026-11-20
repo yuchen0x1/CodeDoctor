@@ -45,33 +45,83 @@ function Install-Package([string] $Package) {
     }
 }
 
-function Test-Launch([string] $Executable, [string] $ExpectedVersion) {
+function Test-DatabaseReady([string] $Database, [bool] $RequireRecovery) {
+    if (!(Test-Path -LiteralPath $Database -PathType Leaf)) { return $false }
+    $PSNativeCommandUseErrorActionPreference = $false
+    python -I -c @'
+import sqlite3, sys
+from pathlib import Path
+
+uri = Path(sys.argv[1]).resolve().as_uri() + "?mode=ro"
+try:
+    with sqlite3.connect(uri, uri=True, timeout=0.25) as db:
+        version = db.execute("SELECT MAX(version) FROM schema_metadata").fetchone()[0]
+        ready = version is not None and version >= 2
+        if ready and sys.argv[2] == "1":
+            recovered = db.execute(
+                "SELECT status, completed_at IS NOT NULL FROM scan_runs WHERE id = ?",
+                ("installer-smoke-scan",),
+            ).fetchone()
+            ready = recovered == ("failed", 1)
+except sqlite3.OperationalError:
+    sys.exit(1)
+sys.exit(0 if ready else 1)
+'@ $Database ([int] $RequireRecovery)
+    if ($LASTEXITCODE -notin @(0, 1)) { throw "SQLite readiness probe exited with $LASTEXITCODE" }
+    return $LASTEXITCODE -eq 0
+}
+
+function Test-Launch([string] $Executable, [string] $ExpectedVersion, [string] $Database, [switch] $RequireRecovery) {
     if ((Get-Item -LiteralPath $Executable).VersionInfo.ProductVersion -ne $ExpectedVersion) {
         throw "Unexpected executable version at $Executable"
     }
     $process = Start-Process -FilePath $Executable -PassThru
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $windowReady = $false
     try {
-        for ($i = 0; $i -lt 60; $i++) {
+        while ($timer.Elapsed.TotalSeconds -lt 30) {
             $process.Refresh()
-            if ($process.HasExited) { throw "CodeDoctor exited during launch ($($process.ExitCode))" }
-            if ($process.MainWindowTitle -eq 'CodeDoctor') { return }
+            if ($process.HasExited) { throw "CodeDoctor $ExpectedVersion exited during launch ($($process.ExitCode))" }
+            $windowReady = $process.MainWindowTitle -eq 'CodeDoctor'
+            # Tauri creates the window before the setup callback opens and migrates SQLite.
+            if ($windowReady -and (Test-DatabaseReady $Database $RequireRecovery.IsPresent) -and !$process.HasExited) { return }
             Start-Sleep -Milliseconds 500
         }
-        throw 'CodeDoctor window did not appear'
+        if (!$windowReady) { throw "CodeDoctor $ExpectedVersion window did not appear" }
+        throw "CodeDoctor $ExpectedVersion did not initialize a readable SQLite database at $Database"
     } finally {
-        if (!$process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        if (!$process.HasExited) { $process.Kill() }
+        $process.WaitForExit()
     }
 }
 
+# Use the Windows known folder, as Tauri does for app_data_dir().
+$appData = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+if (!$appData) { throw 'Windows Roaming AppData is unavailable' }
+$database = Join-Path $appData 'com.codedoctor.desktop/codedoctor.db'
+if (Test-Path -LiteralPath $database) { throw 'Installer smoke test requires a clean CodeDoctor profile' }
+
 Install-Package $baseline
 $installed = Join-Path $installPath 'codedoctor.exe'
-Test-Launch $installed '0.1.1'
-$database = Join-Path $env:APPDATA 'com.codedoctor.desktop/codedoctor.db'
-python -I -c 'import sqlite3, sys; db=sqlite3.connect(sys.argv[1]); db.execute("create table upgrade_test(value integer)"); db.execute("insert into upgrade_test values (42)"); db.commit()' $database
+Test-Launch $installed '0.1.1' $database
+# A running scan must be recovered by startup; an unchanged old database cannot pass the new launch check.
+python -I -c @'
+import sqlite3, sys
+from pathlib import Path
+
+uri = Path(sys.argv[1]).resolve().as_uri() + "?mode=rw"
+with sqlite3.connect(uri, uri=True) as db:
+    db.execute("INSERT INTO projects (id, normalized_path, name, created_at) VALUES (?, ?, ?, ?)",
+               ("installer-smoke-project", sys.argv[2], "Installer smoke test", "1"))
+    db.execute("INSERT INTO scan_runs (id, project_id, status, started_at, config, rule_version, analyzer_versions) VALUES (?, ?, ?, ?, ?, ?, ?)",
+               ("installer-smoke-scan", "installer-smoke-project", "running", "1", "{}", "smoke-test", "{}"))
+    db.execute("CREATE TABLE upgrade_test (value INTEGER)")
+    db.execute("INSERT INTO upgrade_test VALUES (42)")
+'@ $database $scratch
 
 Install-Package $current
-Test-Launch $installed $version
-python -I -c 'import sqlite3, sys; db=sqlite3.connect(sys.argv[1]); assert db.execute("select value from upgrade_test").fetchone() == (42,); assert db.execute("pragma integrity_check").fetchone() == ("ok",)' $database
+Test-Launch $installed $version $database -RequireRecovery
+python -I -c 'import sqlite3, sys; from pathlib import Path; db=sqlite3.connect(Path(sys.argv[1]).resolve().as_uri() + "?mode=ro", uri=True); assert db.execute("select value from upgrade_test").fetchone() == (42,); assert db.execute("pragma integrity_check").fetchone() == ("ok",)' $database
 
 if ($Installer -eq 'msi') {
     Invoke-Msi 'x' $current
