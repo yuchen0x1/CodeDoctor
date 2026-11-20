@@ -18,6 +18,7 @@ use super::security::{
     DangerousExecRule, HardcodedSecretRule, InsecureDeserializationRule, PathTraversalRiskRule,
     SqlConcatRule, WeakRandomRule, XssRiskRule,
 };
+use super::source_redaction::{is_credential_path, sensitive_source_lines};
 use super::{Rule, RuleContext, dedup_drafts, draft_to_issue};
 use crate::domain::types::Issue;
 use crate::parse::ParsedFile;
@@ -91,6 +92,11 @@ impl RuleRunner {
                 config,
             };
             let coverage = parsed.parse.coverage;
+            let credential_file = is_credential_path(&parsed.file.relative_path);
+            let sensitive_lines: Vec<u32> = sensitive_source_lines(&parsed.text)
+                .enumerate()
+                .filter_map(|(index, (_, sensitive))| sensitive.then_some(index as u32 + 1))
+                .collect();
             for rule in &self.rules {
                 if !config.is_rule_enabled(rule.id()) {
                     continue;
@@ -98,7 +104,15 @@ impl RuleRunner {
                 if !rule.supports(ctx.language(), coverage) {
                     continue;
                 }
-                for draft in dedup_drafts(rule.check(&ctx)) {
+                for mut draft in dedup_drafts(rule.check(&ctx)) {
+                    let first = sensitive_lines.partition_point(|line| *line < draft.start_line);
+                    if credential_file
+                        || sensitive_lines
+                            .get(first)
+                            .is_some_and(|line| *line <= draft.end_line)
+                    {
+                        draft.evidence = "疑似凭据已隐藏".into();
+                    }
                     issues.push(draft_to_issue(&draft, &parsed.file.relative_path, coverage));
                 }
             }
@@ -173,6 +187,58 @@ mod tests {
 
         let issues_all = run_on_file(&f, &text, &RuleConfig::default());
         assert!(issues_all.iter().any(|i| i.rule_id == "quality.long-line"));
+    }
+
+    #[test]
+    fn redacts_multiline_credential_evidence_but_keeps_ordinary_findings() {
+        let config = RuleConfig {
+            enabled_rules: Some(vec!["quality.long-line".into()]),
+            ..RuleConfig::default()
+        };
+        let secret = "a".repeat(160);
+        let ordinary = "z".repeat(160);
+        for (language, path, opener, closer) in [
+            ("Python", "config.py", "password = \"\"\"", "\"\"\""),
+            ("Python", "config.py", "password: str = '''", "'''"),
+            ("Python", "config.py", "password: str = f\"\"\"", "\"\"\""),
+            ("Python", "config.py", "password: str = r'''", "'''"),
+            ("Python", "config.py", "password: bytes = b\"\"\"", "\"\"\""),
+            ("Python", "config.py", "password: str = u'''", "'''"),
+            ("Python", "config.py", "password: str = fr\"\"\"", "\"\"\""),
+            ("Python", "config.py", "password: str = rf'''", "'''"),
+            (
+                "Python",
+                "config.py",
+                "password: bytes = br\"\"\"",
+                "\"\"\"",
+            ),
+            ("Python", "config.py", "password: bytes = rb'''", "'''"),
+            ("TypeScript", "config.ts", "const api_key: string = `", "`"),
+            ("Go", "config.go", "api_key := `", "`"),
+            (
+                "YAML",
+                "config.yml",
+                "secret: | # setting=value",
+                "next: value",
+            ),
+            (
+                "Python",
+                "config.py",
+                "-----BEGIN PRIVATE KEY-----",
+                "-----END PRIVATE KEY-----",
+            ),
+        ] {
+            let text = format!("{opener}\n  {secret}\n{closer}\n{ordinary}\n");
+            let issues = run_on_file(&file(language, path), &text, &config);
+            assert_eq!(issues.len(), 2, "{language}");
+            assert_eq!(issues[0].start_line, 2, "{language}");
+            assert_eq!(issues[0].evidence, "疑似凭据已隐藏", "{language}");
+            assert!(issues[1].evidence.contains(&ordinary), "{language}");
+            assert!(
+                !serde_json::to_string(&issues).unwrap().contains(&secret),
+                "{language} must not retain the credential in issue fields"
+            );
+        }
     }
 
     #[test]

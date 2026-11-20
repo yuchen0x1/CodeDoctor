@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 pub const RULE_CONFIG_VERSION: u32 = 1;
 /// Bumped whenever rule semantics, source positions, or thresholds change materially.
-pub const RULE_VERSION: &str = "rules-3";
+pub const RULE_VERSION: &str = "rules-4";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]

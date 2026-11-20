@@ -9,6 +9,7 @@ pub mod config;
 mod local_quality;
 pub mod runner;
 pub mod security;
+pub(crate) mod source_redaction;
 
 #[cfg(test)]
 mod fixture_tests;

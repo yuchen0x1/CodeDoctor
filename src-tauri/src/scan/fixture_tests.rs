@@ -170,6 +170,77 @@ fn missing_project_job_persists_safe_failure_for_reopened_history() {
 }
 
 #[test]
+fn multiline_credentials_stay_redacted_through_cache_storage_and_reports() {
+    use crate::report::{ReportFormat, render_with_score};
+    use crate::score::{ScanSnapshot, calculate_score};
+
+    let fixture = Fixture::new();
+    let secret = "syntheticcredentialsegment".repeat(7);
+    let ordinary = "z".repeat(160);
+    fs::write(
+        fixture.0.join("main.py"),
+        format!("password: str = \"\"\"\n{secret}\n\"\"\"\npassword: str = f\"\"\"\n{secret}\n\"\"\"\npassword: str = (\n    r\"\"\"\n{secret}\n\"\"\"\n)\n{ordinary}\n"),
+    )
+    .unwrap();
+    let state = AppState::in_memory().unwrap();
+    register_project(&state, &fixture.0);
+    let sink: EventSink = Box::new(|_| {});
+    for id in ["redaction-first", "redaction-cached"] {
+        let params = seed_job(&state, id, &fixture.0);
+        run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
+        let store = state.storage().unwrap();
+        let run = store.get_scan_run(id).unwrap().unwrap();
+        assert_eq!(run.status, ScanStatus::Completed);
+        let snapshot = ScanSnapshot::load(&store, run).unwrap();
+        assert!(snapshot.issues.iter().any(|issue| {
+            issue.rule_id == "quality.long-line"
+                && issue.start_line == 2
+                && issue.evidence == "疑似凭据已隐藏"
+        }));
+        assert!(snapshot.issues.iter().any(|issue| {
+            issue.rule_id == "quality.long-line" && issue.evidence.contains(&ordinary)
+        }));
+        assert!(
+            !serde_json::to_string(&snapshot.issues)
+                .unwrap()
+                .contains(&secret)
+        );
+        let file = store.get_file_for_run(id, "main.py").unwrap().unwrap();
+        let cache_key = rule_cache_key(
+            "fixture",
+            "main.py",
+            &file.content_hash[..32],
+            RULE_VERSION,
+            &serde_json::to_string(&params.config).unwrap(),
+        );
+        let cached = store.get_cached_issues(&cache_key).unwrap().unwrap();
+        assert!(!serde_json::to_string(&cached).unwrap().contains(&secret));
+        let legacy_key = rule_cache_key(
+            "fixture",
+            "main.py",
+            &file.content_hash[..32],
+            "rules-3",
+            &serde_json::to_string(&params.config).unwrap(),
+        );
+        assert_ne!(cache_key, legacy_key);
+        let score = calculate_score(&snapshot);
+        for format in [
+            ReportFormat::Json,
+            ReportFormat::Markdown,
+            ReportFormat::Txt,
+            ReportFormat::Html,
+            ReportFormat::Sarif,
+        ] {
+            let report = render_with_score(&snapshot, &score, format).unwrap();
+            assert!(
+                !report.contains(&secret),
+                "{format:?} exposed credential evidence"
+            );
+        }
+    }
+}
+
+#[test]
 fn repeated_scan_preserves_findings_with_distinct_ids_and_actual_coverage() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.0.join("gEnErAtEd")).unwrap();

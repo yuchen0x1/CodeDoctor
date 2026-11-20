@@ -157,3 +157,17 @@
 另看了 [Bearer](https://github.com/Bearer/bearer)：其源码标注 Elastic License 2.0（并非宽松开源许可证）；基线报告、指纹忽略和 JSON/SARIF/HTML 输出可供交互设计参考，但不在本次开放源码许可项目统计中。所有许可证均为仓库/版本层面的初步核验，集成前仍应审查具体组件、规则和传递依赖。
 
 本轮综合结论：离线扫描项目应明确分析完整性、工具失败和中断状态；保留诊断时应有长度/控制字符边界，避免路径和源码内容流入共享报告；大量本地源文件的总资源限制需先实测再设计。安全和性能观察是后续候选，不把未复现的影响描述成已发生缺陷。
+
+## 2026-11-21 凭据预览与报告证据边界复核
+
+本次实际通过 GitHub API 重读以下五仓库的 README、许可证及所列实现/文档，核对未归档状态；没有安装这些工具、运行第三方性能基准或复制代码。功能说明与本项目的实际源码审查对照，不把工具自身的性能宣传视作 CodeDoctor 的测量结果。
+
+| 仓库与已核验许可 | 功能、架构与交互 | 数据、安全和扩展边界 | CodeDoctor 对照与本轮决定 |
+| --- | --- | --- | --- |
+| [Gitleaks](https://github.com/gitleaks/gitleaks) · MIT | Go CLI 面向 Git、目录和 stdin 的凭据扫描，支持报告；本次 README 明确功能冻结、以后以安全补丁为主，不能称为持续新增功能。 | [Finding.Redact](https://github.com/gitleaks/gitleaks/blob/master/report/finding.go)同步替换 Line、Match 和 Secret；CLI 源码许可不能代替 GitHub Action 的独立许可条件。 | 本项目不仅有源码预览，还有规则证据、缓存和历史报告；只隐藏一个视图不够。采用同一敏感行分类，在证据进入缓存前处理。 |
+| [Ruff](https://github.com/astral-sh/ruff) · MIT | Rust Python 检查/格式化与编辑器集成；[配置文档](https://github.com/astral-sh/ruff/blob/main/docs/configuration.md)说明层级配置及 `--isolated`。 | `--isolated` 忽略配置；格式化/修复属于另一类写操作。可复用诊断格式，不等于允许执行项目脚本。 | 保留现有可选 Ruff 的隔离只读入口，不为本次安全修复引入新工具或依赖。 |
+| [Semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | 规则扫描引擎与 Python CLI，机器格式化与引擎分层；[SARIF formatter](https://github.com/semgrep/semgrep/blob/develop/cli/src/semgrep/formatter/sarif.py)从结构化诊断生成输出。 | README 区分社区引擎与专有规则/能力；远程规则配置和指标上报的网络行为需单独核查。 | 保持本机分析、诊断与渲染分离；不把标准 SARIF 当作其它报告已完成脱敏的证明。没有复制 LGPL 实现或引入联网规则。 |
+| [Biome](https://github.com/biomejs/biome) · MIT OR Apache-2.0 | Rust Web 工具链，CLI/编辑器使用共享诊断服务；[Workspace](https://github.com/biomejs/biome/blob/main/crates/biome_service/src/workspace.rs)明确线程安全、打开文档与缓存生命周期。 | 共享引擎减少不同客户端的行为漂移；缓存必须随语义失效。它并非 SQLite 历史审阅桌面应用。 | 将预览与逐文件规则证据的分类提取为共享小模块；规则版本升至 `rules-4`，不复用旧脱敏语义缓存。 |
+| [Trivy](https://github.com/aquasecurity/trivy) · Apache-2.0 | Go CLI 聚合漏洞、配置、许可和凭据检测；[Secret Scanning](https://github.com/aquasecurity/trivy/blob/main/docs/guide/scanner/secret.md)列出规则、允许路径及遮蔽输出示例。 | 凭据覆盖由规则与排除边界决定；未命中不代表不存在凭据，漏洞数据库等网络需求不等于本地扫描。 | 凭据遮蔽仍明示为保守启发式；不把新的敏感行判断包装为全量 DLP，不新增大型扫描依赖。 |
+
+这些项目主要提供 CLI 或编辑器诊断；本次没有对其 GUI、安装器、资源占用或实际扫描速度作实测比较。CodeDoctor 保留 Windows 十工作区、SQLite 历史、离线目录/ZIP 与 Linux CLI 的定位，不引入中央服务。新增回归覆盖带类型注解的多行值，以及规则→缓存→数据库→五种报告的完整证据通路；历史记录与已导出的文件不被自动改写，分享前仍需检查。

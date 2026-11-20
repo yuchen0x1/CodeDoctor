@@ -3,7 +3,8 @@
 use crate::domain::types::{FileRecord, ScanStatus};
 use crate::error::AppError;
 use crate::index::{MAX_SOURCE_FILE_BYTES, encoding::decode_bytes};
-use crate::rules::security::{HARDCODED_SECRET_RULE_ID, may_expose_credential};
+use crate::rules::security::HARDCODED_SECRET_RULE_ID;
+use crate::rules::source_redaction::{is_credential_path, sensitive_source_lines};
 use crate::state::AppState;
 use crate::storage::IssueLocation;
 use serde::Serialize;
@@ -20,12 +21,6 @@ mod tests;
 const CONTEXT_LINES: u32 = 6;
 const MAX_EXCERPT_LINES: u32 = 32;
 const MAX_LINE_CHARS: usize = 640;
-
-#[derive(Clone, Copy)]
-enum MultilineCredential {
-    Quoted(&'static str),
-    YamlBlock { key_indent: usize },
-}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -245,110 +240,20 @@ impl IssueSource {
     fn source_lines<'a>(&'a self, text: &'a str) -> impl Iterator<Item = (&'a str, bool)> {
         let credential_file = is_credential_path(&self.location.file_path);
         let marked_secret = self.location.rule_id == HARDCODED_SECRET_RULE_ID;
-        let mut inside_private_key = false;
-        let mut multiline_credential = None;
-        text.lines().enumerate().map(move |(index, line)| {
-            if line.contains("-----BEGIN ") && line.contains("PRIVATE KEY-----") {
-                inside_private_key = true;
-            }
-            let line_no = index as u32 + 1;
-            let credential_line = may_expose_credential(line);
-            let mut multiline_continuation = false;
-            if let Some(state) = multiline_credential {
-                match state {
-                    MultilineCredential::Quoted(delimiter) => {
-                        multiline_continuation = true;
-                        if contains_unescaped_delimiter(line, delimiter) {
-                            multiline_credential = None;
-                        }
-                    }
-                    MultilineCredential::YamlBlock { key_indent } => {
-                        if line.trim().is_empty() {
-                            // Blank lines do not expose a value, but remain inside the block.
-                        } else if leading_indent(line) > key_indent {
-                            multiline_continuation = true;
-                        } else {
-                            multiline_credential = None;
-                        }
-                    }
-                }
-            }
-            let sensitive = credential_file
-                || inside_private_key
-                || multiline_continuation
-                || (marked_secret
-                    && (self.location.start_line..=self.location.end_line).contains(&line_no))
-                || credential_line;
-            if multiline_credential.is_none() {
-                multiline_credential = multiline_credential_start(line, credential_line);
-            }
-            if line.contains("-----END ") && line.contains("PRIVATE KEY-----") {
-                inside_private_key = false;
-            }
-            (line, sensitive)
-        })
+        sensitive_source_lines(text)
+            .enumerate()
+            .map(move |(index, (line, sensitive))| {
+                let line_no = index as u32 + 1;
+                (
+                    line,
+                    credential_file
+                        || sensitive
+                        || (marked_secret
+                            && (self.location.start_line..=self.location.end_line)
+                                .contains(&line_no)),
+                )
+            })
     }
-}
-
-fn multiline_credential_start(line: &str, credential_line: bool) -> Option<MultilineCredential> {
-    if !credential_line {
-        return None;
-    }
-    let assignment = line.find(['=', ':'])?;
-    let value = &line[assignment..];
-    let value = value.strip_prefix(":=").unwrap_or(&value[1..]).trim_start();
-    for (delimiter, state) in [
-        ("\"\"\"", MultilineCredential::Quoted("\"\"\"")),
-        ("'''", MultilineCredential::Quoted("'''")),
-        ("`", MultilineCredential::Quoted("`")),
-    ] {
-        if let Some(after_open) = value.strip_prefix(delimiter)
-            && !contains_unescaped_delimiter(after_open, delimiter)
-        {
-            return Some(state);
-        }
-    }
-    if value.starts_with(['|', '>']) {
-        return Some(MultilineCredential::YamlBlock {
-            key_indent: leading_indent(line),
-        });
-    }
-    None
-}
-
-fn contains_unescaped_delimiter(line: &str, delimiter: &str) -> bool {
-    line.match_indices(delimiter).any(|(index, _)| {
-        let backslashes = line[..index]
-            .chars()
-            .rev()
-            .take_while(|character| *character == '\\')
-            .count();
-        backslashes % 2 == 0
-    })
-}
-
-fn leading_indent(line: &str) -> usize {
-    line.chars()
-        .take_while(|character| matches!(character, ' ' | '\t'))
-        .count()
-}
-
-fn is_credential_path(relative: &str) -> bool {
-    let name = relative
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    name == ".env"
-        || name.starts_with(".env.")
-        || matches!(
-            name.as_str(),
-            ".npmrc" | ".netrc" | "credentials" | "id_rsa" | "id_ed25519"
-        )
-        || Path::new(&name)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext, "pem" | "key" | "p12" | "pfx"))
 }
 
 fn invalid_source_path() -> AppError {

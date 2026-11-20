@@ -310,6 +310,30 @@ fn redacts_multiline_credential_values_when_excerpt_starts_after_the_key() {
             "`\n",
         ),
         (
+            "TypeScript annotated template literal",
+            "const api_key: string = `\n",
+            "  synthetic-typescript-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "TypeScript annotation containing an equals sign",
+            "const api_key: { format: \"x=y\" } = `\n",
+            "  synthetic-typescript-type-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "Python annotated triple-quoted string",
+            "password: str = \"\"\"\n",
+            "  synthetic-python-annotated-secret-marker\n",
+            "\"\"\"\n",
+        ),
+        (
+            "Python annotated single-quoted string",
+            "password: str = '''\n",
+            "  synthetic-python-single-secret-marker\n",
+            "'''\n",
+        ),
+        (
             "Go short declaration raw string",
             "api_key := `\n",
             "  synthetic-go-secret-marker\n",
@@ -319,6 +343,18 @@ fn redacts_multiline_credential_values_when_excerpt_starts_after_the_key() {
             "YAML block scalar",
             "  secret: |\n",
             "    synthetic-yaml-secret-marker\n",
+            "  ordinary: value\n",
+        ),
+        (
+            "YAML block scalar with an equals sign in its comment",
+            "  secret: | # setting=value\n",
+            "    synthetic-yaml-comment-secret-marker\n",
+            "  ordinary: value\n",
+        ),
+        (
+            "YAML folded scalar with an equals sign in its comment",
+            "  secret: >- # setting=value\n",
+            "    synthetic-yaml-folded-secret-marker\n",
             "  ordinary: value\n",
         ),
     ];
@@ -344,6 +380,60 @@ fn redacts_multiline_credential_values_when_excerpt_starts_after_the_key() {
             open_issue_source_state(&state, RUN, ISSUE).is_err(),
             "{name}"
         );
+    }
+}
+
+#[test]
+fn redacts_python_prefixed_multiline_credentials() {
+    let fixture = Fixture::create();
+    for prefix in [
+        "r", "R", "u", "U", "b", "B", "f", "F", "t", "T", "fr", "rf", "br", "rb", "tr", "rt", "Fr",
+        "rF", "BR", "RB", "Tr", "rT",
+    ] {
+        for quote in ["\"\"\"", "'''"] {
+            let text = format!(
+                "password: str = {prefix}{quote}\nsynthetic-prefixed-credential-marker\n{quote}\nprint('done')\n"
+            );
+            let state = fixture.directory_state("example.py", text.as_bytes(), 2, 2);
+            let context = read(&state);
+            assert!(context.redacted, "{prefix}{quote}");
+            assert!(!context.can_open_natively, "{prefix}{quote}");
+            assert!(
+                !context
+                    .text
+                    .contains("synthetic-prefixed-credential-marker"),
+                "{prefix}{quote}"
+            );
+            assert!(context.text.contains("print('done')"), "{prefix}{quote}");
+            assert!(
+                open_issue_source_state(&state, RUN, ISSUE).is_err(),
+                "{prefix}{quote}"
+            );
+        }
+    }
+}
+
+#[test]
+fn redacts_parenthesized_multiline_credentials() {
+    let fixture = Fixture::create();
+    for opener in [
+        "password: str = (\n    r\"\"\"",
+        "password = (f\"\"\"",
+        "password = (\n    # a comment\n    \n    fr\"\"\"",
+    ] {
+        let text = format!(
+            "{opener}\nsynthetic-parenthesized-credential-marker\n\"\"\"\n)\nprint('done')\n"
+        );
+        let state = fixture.directory_state("example.py", text.as_bytes(), 3, 3);
+        let context = read(&state);
+        assert!(context.redacted);
+        assert!(
+            !context
+                .text
+                .contains("synthetic-parenthesized-credential-marker")
+        );
+        assert!(context.text.contains("print('done')"));
+        assert!(!context.can_open_natively);
     }
 }
 
