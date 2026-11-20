@@ -244,6 +244,7 @@ mod tests {
                 status: crate::domain::types::ScanStatus::Completed,
                 started_at: Some("1".into()),
                 completed_at: Some("2".into()),
+                failure_message: None,
                 config: json!({}),
                 rule_version: crate::rules::config::RULE_VERSION.into(),
                 analyzer_versions: json!({}),

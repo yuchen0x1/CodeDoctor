@@ -160,6 +160,7 @@ mod tests {
                 status: ScanStatus::Completed,
                 started_at: Some("1".into()),
                 completed_at: Some("2".into()),
+                failure_message: None,
                 config: json!({}),
                 rule_version: "rules-1".into(),
                 analyzer_versions: json!({}),

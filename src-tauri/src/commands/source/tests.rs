@@ -59,6 +59,7 @@ fn snapshot(root: &Path, relative: &str, bytes: &[u8], line: u32, end: u32) -> A
             status: ScanStatus::Completed,
             started_at: Some("1".into()),
             completed_at: Some("2".into()),
+            failure_message: None,
             config: json!({}),
             rule_version: "test".into(),
             analyzer_versions: json!({}),
@@ -290,6 +291,71 @@ fn masks_credential_lines_and_multiline_private_keys_in_other_findings() {
     assert!(!context.text.contains("fake-fixture-only"));
     assert!(!context.text.contains("placeholder-fixture-key"));
     assert!(open_issue_source_state(&state, RUN, ISSUE).is_err());
+}
+
+#[test]
+fn redacts_multiline_credential_values_when_excerpt_starts_after_the_key() {
+    let fixture = Fixture::create();
+    let cases = [
+        (
+            "triple-quoted Python",
+            "password = \"\"\"\n",
+            "  synthetic-python-secret-marker\n",
+            "\"\"\"\n",
+        ),
+        (
+            "JavaScript template literal",
+            "api_key = `\n",
+            "  synthetic-backtick-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "Go short declaration raw string",
+            "api_key := `\n",
+            "  synthetic-go-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "YAML block scalar",
+            "  secret: |\n",
+            "    synthetic-yaml-secret-marker\n",
+            "  ordinary: value\n",
+        ),
+    ];
+
+    for (name, opener, secret, closer) in cases {
+        let text = format!(
+            "{}{opener}{secret}{closer}{}",
+            "preamble\n".repeat(8),
+            (1..=20)
+                .map(|line| format!("ordinary code {line}\n"))
+                .collect::<String>()
+        );
+        let state = fixture.directory_state("example.py", text.as_bytes(), 16, 16);
+        let context = read(&state);
+        assert!(context.redacted, "{name}");
+        assert!(
+            context.text.lines().any(|line| line == "[疑似凭据已隐藏]"),
+            "{name} continuation should be masked"
+        );
+        assert!(!context.text.contains(secret.trim()), "{name}");
+        assert!(context.text.contains("ordinary code 10"), "{name}");
+        assert!(
+            open_issue_source_state(&state, RUN, ISSUE).is_err(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn keeps_unrelated_multiline_code_visible() {
+    let fixture = Fixture::create();
+    let text = "message = \"\"\"\nordinary synthetic text marker\n\"\"\"\nprint('done')\n";
+    let state = fixture.directory_state("example.py", text.as_bytes(), 2, 2);
+    let context = read(&state);
+    assert!(!context.redacted);
+    assert!(context.text.contains("ordinary synthetic text marker"));
+    assert!(context.text.contains("print('done')"));
 }
 
 #[test]

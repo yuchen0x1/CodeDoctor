@@ -179,6 +179,7 @@ mod tests {
                 status: ScanStatus::Completed,
                 started_at: None,
                 completed_at: None,
+                failure_message: None,
                 config: json!({}),
                 rule_version: "r".into(),
                 analyzer_versions: json!({}),

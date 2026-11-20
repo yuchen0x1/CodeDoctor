@@ -140,3 +140,20 @@
 | [Ericsson/codechecker](https://github.com/Ericsson/codechecker) · Apache-2.0 | [架构](https://github.com/Ericsson/codechecker/blob/53222cd5d7566c553d8d7edbb5134a35a56ef15e/docs/architecture.md)区分分析器、报告转换和可选 Web 服务 | 先支持安全的报告互操作；导入目录/ZIP 不触发构建或执行外部代码。 |
 
 上述比较支持本次的低依赖改进：SARIF 结果引用去重的规则表、区分分析执行状态与门禁退出码，并避免输出猜测的位置；文件保存对话框只在其异步选择期间锁定对应表单。下一步应以真实消费端验证行级注释与跨扫描去重，再评估是否增加 SARIF 上传或新增问题基线门禁。
+
+## 2026-11-21 桌面扫描器与报告生态复核
+
+本次复核了下列公开项目的 README、相关实现和许可证声明，只借鉴方案，不复制代码或新增运行时依赖。社区活动仅用于判断维护状态，不代表性能对比；仓库许可证也不覆盖所有规则集和传递依赖。
+
+| 参考项目与许可证 | 已核验的做法 | 可借鉴方向与边界 |
+| --- | --- | --- |
+| [semgrep/semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | [CLI 文档](https://docs.semgrep.dev/cli-reference)包含机器报告、超时、并发和内存控制；架构区分 Python CLI 与 OCaml 分析引擎。 | 将诊断与工具执行状态分开；本地分析不等于完全离线，网络遥测、规则获取需独立核实。 |
+| [oxsecurity/megalinter](https://github.com/oxsecurity/megalinter) · AGPL-3.0 | [插件描述](https://github.com/oxsecurity/megalinter/blob/main/docs/plugins.md)及超时、分组和报告配置集中描述多工具集成；SARIF 仅聚合支持它的工具。 | 为适配器明确工具版本、覆盖和失败状态；插件/命令会扩大执行信任边界，不宜照搬至导入项目。 |
+| [golangci/golangci-lint](https://github.com/golangci/golangci-lint) · GPL-3.0 | [架构文档](https://golangci-lint.run/docs/contributing/architecture/)分离运行、过滤、去重和输出阶段。 | 保持分析、归一化和展示分层；其共享 Go 类型信息优化不可直接推断适用于 Tree-sitter 多语言管线。 |
+| [microsoft/sarif-vscode-extension](https://github.com/microsoft/sarif-vscode-extension) · MIT | [查看器](https://github.com/microsoft/sarif-vscode-extension/blob/main/README.md)提供可筛选结果、详情、键盘导航和源码位置对接。 | 继续优先完善结果筛选与定位；这是 SARIF 阅读器，不是扫描引擎或历史数据库。 |
+| [SonarSource/sonarqube](https://github.com/SonarSource/sonarqube) · LGPL-3.0 | [问题生命周期](https://docs.sonarsource.com/sonarqube-community-build/user-guide/issues/solution-overview)及[历史维护](https://docs.sonarsource.com/sonarqube-community-build/project-administration/maintaining-project/managing-project-history)区分持久问题状态和分析快照。 | 可研究保留期及问题状态语义；本地 SQLite 产品无需引入其服务端架构或商业版能力。 |
+| [tauri-apps/plugins-workspace](https://github.com/tauri-apps/plugins-workspace) · Apache-2.0 OR MIT | [SQL 插件文档](https://v2.tauri.app/plugin/sql/)采用版本化迁移和受限权限。 | 本项目继续由窄 Rust 命令访问 SQLite，不开放前端任意 SQL；插件许可与 API 不代表加密或沙箱能力。 |
+
+另看了 [Bearer](https://github.com/Bearer/bearer)：其源码标注 Elastic License 2.0（并非宽松开源许可证）；基线报告、指纹忽略和 JSON/SARIF/HTML 输出可供交互设计参考，但不在本次开放源码许可项目统计中。所有许可证均为仓库/版本层面的初步核验，集成前仍应审查具体组件、规则和传递依赖。
+
+本轮综合结论：离线扫描项目应明确分析完整性、工具失败和中断状态；保留诊断时应有长度/控制字符边界，避免路径和源码内容流入共享报告；大量本地源文件的总资源限制需先实测再设计。安全和性能观察是后续候选，不把未复现的影响描述成已发生缺陷。

@@ -102,6 +102,7 @@ mod tests {
             status: ScanStatus::Running,
             started_at: Some("2026-11-17T00:00:00Z".to_owned()),
             completed_at: None,
+            failure_message: None,
             config: json!({"mode": "full"}),
             rule_version: "rules-1".to_owned(),
             analyzer_versions: json!({}),
@@ -109,11 +110,35 @@ mod tests {
             scanned_files: 3,
             total_issues: 1,
         };
-        let serialized: Value = serde_json::to_value(run).unwrap();
+        let mut serialized: Value = serde_json::to_value(&run).unwrap();
 
         assert_eq!(serialized["projectId"], json!("project-1"));
         assert_eq!(serialized["startedAt"], json!("2026-11-17T00:00:00Z"));
         assert_eq!(serialized["analyzerVersions"], json!({}));
+        assert!(serialized.get("failureMessage").is_none());
+        // Older snapshots have no failureMessage, and explicit null remains valid.
+        assert_eq!(
+            serde_json::from_value::<ScanRun>(serialized.clone()).unwrap(),
+            run
+        );
+        serialized["failureMessage"] = Value::Null;
+        assert_eq!(serde_json::from_value::<ScanRun>(serialized).unwrap(), run);
+
+        let failed = ScanRun {
+            status: ScanStatus::Failed,
+            failure_message: Some("filesystem item was not found".to_owned()),
+            ..run
+        };
+        let serialized = serde_json::to_value(&failed).unwrap();
+        assert_eq!(
+            serialized["failureMessage"],
+            "filesystem item was not found"
+        );
+        assert!(serialized.get("failure_message").is_none());
+        assert_eq!(
+            serde_json::from_value::<ScanRun>(serialized).unwrap(),
+            failed
+        );
     }
 
     fn test_issue(evidence: &str) -> Issue {
@@ -209,6 +234,8 @@ pub struct ScanRun {
     pub status: ScanStatus,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_message: Option<String>,
     pub config: Value,
     pub rule_version: String,
     pub analyzer_versions: Value,

@@ -143,6 +143,7 @@ pub fn start_scan_state(
         status: ScanStatus::Running,
         started_at: Some(started_at),
         completed_at: None,
+        failure_message: None,
         config: recorded_config,
         rule_version: RULE_VERSION.to_owned(),
         analyzer_versions: json!({}),
@@ -184,16 +185,16 @@ pub fn start_scan_state(
         .is_err()
     {
         jobs.remove(&run_id);
+        let error = AppError::Validation("scan worker could not be started".to_owned());
         state.storage()?.finish_scan_run(
             &run_id,
             ScanStatus::Failed,
             &now_millis().to_string(),
             0,
             0,
+            Some(&error),
         )?;
-        return Err(AppError::Validation(
-            "scan worker could not be started".to_owned(),
-        ));
+        return Err(error);
     }
 
     Ok(summary_of(run))

@@ -158,6 +158,50 @@ describe("project restoration", () => {
   });
 });
 
+describe("saved scan failures", () => {
+  const failedScan = (failureMessage?: string): ScanRun => ({
+    ...scan("failed-scan"), status: "failed", startedAt: null,
+    config: { maxComplexity: 12, enabledAnalyzers: ["ruff"] }, failureMessage,
+  });
+  const openSaved = async (saved: ScanRun) => {
+    vi.mocked(bridge.listScanRuns).mockResolvedValue([saved, ...scans]);
+    vi.mocked(bridge.getScan).mockImplementation(async (id) => ({ run: id === saved.id ? saved : scans.find((item) => item.id === id)!, elapsedMs: 0 }));
+    await mount();
+    await click(saved.id);
+  };
+
+  it("shows a persisted failure without a live event and retries with the original configuration", async () => {
+    const saved = failedScan("扫描失败：project path does not exist <private>");
+    await openSaved(saved);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(saved.failureMessage);
+    expect(container.querySelector("private")).toBeNull();
+    expect(button("按原设置重新扫描").disabled).toBe(false);
+    vi.mocked(bridge.startScan).mockResolvedValue({ run: scans[0], elapsedMs: 0 });
+    await click("按原设置重新扫描");
+    expect(bridge.startScan).toHaveBeenCalledWith("A", saved.config, ["ruff"]);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("explains when an older failed scan has no recorded diagnostic", async () => {
+    await openSaved(failedScan());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("此任务未记录详细原因");
+  });
+
+  it("shows the recorded interruption reason when reopening a recovered task", async () => {
+    const saved = failedScan("扫描被应用退出中断，请按原设置重新扫描。");
+    saved.config.interrupted = true;
+    await openSaved(saved);
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(saved.failureMessage);
+    expect(button("按原设置重新扫描").disabled).toBe(false);
+  });
+
+  it.each(["completed", "canceled"] as const)("does not present a stale failure diagnostic for a %s task", async (status) => {
+    await openSaved({ ...failedScan("outdated diagnostic"), status });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.textContent).not.toContain("outdated diagnostic");
+  });
+});
+
 describe("history selections", () => {
   it("keeps chosen snapshots when delayed score loading refreshes history and exports the chosen snapshot", async () => {
     const score = deferred<ReportResult>();

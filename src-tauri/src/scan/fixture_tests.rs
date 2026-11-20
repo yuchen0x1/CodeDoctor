@@ -85,6 +85,7 @@ fn run_record(run_id: &str, status: ScanStatus) -> ScanRun {
         status,
         started_at: Some((now_millis() - 1500).to_string()),
         completed_at: None,
+        failure_message: None,
         config: json!({"maxLineLength": 80}),
         rule_version: RULE_VERSION.into(),
         analyzer_versions: json!({}),
@@ -115,6 +116,60 @@ fn seed_job(state: &AppState, run_id: &str, root: &Path) -> ScanParams {
 }
 
 #[test]
+fn missing_project_job_persists_safe_failure_for_reopened_history() {
+    let fixture = Fixture::new();
+    let db = fixture.0.join("failure.db");
+    let db = db.to_str().unwrap();
+    let missing = fixture.0.join("private-project-token-missing");
+    let persisted;
+    {
+        let state = AppState::open(db).unwrap();
+        register_project(&state, &missing);
+        let params = seed_job(&state, "missing-path", &missing);
+        let original_config = get_scan_state(&state, "missing-path").unwrap().run.config;
+        let (events_tx, events_rx) = mpsc::channel();
+        let sink: EventSink = Box::new(move |event| {
+            events_tx.send(event.clone()).unwrap();
+        });
+        let error = run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap_err();
+        assert_eq!(error.to_string(), "filesystem item was not found");
+        persisted = get_scan_state(&state, "missing-path").unwrap().run;
+        assert_eq!(persisted.status, ScanStatus::Failed);
+        assert!(persisted.completed_at.is_some());
+        assert_eq!(
+            persisted.failure_message.as_deref(),
+            Some("filesystem item was not found")
+        );
+        assert_eq!(persisted.config, original_config);
+        let event = events_rx
+            .try_iter()
+            .find(|event| event.stage == "done")
+            .unwrap();
+        assert_eq!(event.status, "failed");
+        assert_eq!(
+            event.message.as_deref(),
+            Some("扫描失败：filesystem item was not found")
+        );
+        let json = serde_json::to_string(&persisted).unwrap();
+        assert!(!json.contains("private-project-token"));
+        assert!(!json.contains("interrupted"));
+    }
+    let reopened = AppState::open(db).unwrap();
+    assert_eq!(
+        get_scan_state(&reopened, "missing-path").unwrap().run,
+        persisted
+    );
+    assert_eq!(
+        reopened
+            .storage()
+            .unwrap()
+            .list_scan_runs("fixture")
+            .unwrap(),
+        vec![persisted]
+    );
+}
+
+#[test]
 fn repeated_scan_preserves_findings_with_distinct_ids_and_actual_coverage() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.0.join("gEnErAtEd")).unwrap();
@@ -136,6 +191,7 @@ fn repeated_scan_preserves_findings_with_distinct_ids_and_actual_coverage() {
         run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
         let summary = get_scan_state(&state, id).unwrap();
         assert_eq!(summary.run.status, ScanStatus::Completed);
+        assert!(summary.run.failure_message.is_none());
         assert_eq!(summary.run.total_files, 1);
         assert_eq!(summary.run.scanned_files, 1);
         assert_eq!(
@@ -202,10 +258,9 @@ fn paused_rules_can_be_canceled_and_terminal_status_cannot_be_overwritten() {
     );
     cancel_scan_state(&state, "active").unwrap();
     assert!(worker.join().unwrap().is_err());
-    assert_eq!(
-        get_scan_state(&state, "active").unwrap().run.status,
-        ScanStatus::Canceled
-    );
+    let canceled = get_scan_state(&state, "active").unwrap().run;
+    assert_eq!(canceled.status, ScanStatus::Canceled);
+    assert!(canceled.failure_message.is_none());
     pause_scan_state(&state, "active").unwrap();
     cancel_scan_state(&state, "active").unwrap();
     assert_eq!(
@@ -296,16 +351,18 @@ fn restart_recovers_interrupted_runs_and_preserves_their_settings() {
     {
         let state = AppState::open(db_path).unwrap();
         register_project(&state, &fixture.0);
-        state
-            .storage()
-            .unwrap()
-            .create_scan_run(&run_record("running", ScanStatus::Running))
-            .unwrap();
-        state
-            .storage()
-            .unwrap()
-            .create_scan_run(&run_record("canceling", ScanStatus::Canceling))
-            .unwrap();
+        for (id, status) in [
+            ("running", ScanStatus::Running),
+            ("queued", ScanStatus::Queued),
+            ("paused", ScanStatus::Paused),
+            ("canceling", ScanStatus::Canceling),
+            ("completed", ScanStatus::Completed),
+        ] {
+            let mut run = run_record(id, status);
+            run.config["enabledAnalyzers"] = json!(["ruff"]);
+            run.config["excludedDirectories"] = json!(["Generated"]);
+            state.storage().unwrap().create_scan_run(&run).unwrap();
+        }
         let root = state.scan_work_root.as_ref().unwrap();
         abandoned = root.join(new_run_id(1));
         unrelated = root.join("unrelated");
@@ -318,14 +375,36 @@ fn restart_recovers_interrupted_runs_and_preserves_their_settings() {
         );
     }
     let reopened = AppState::open(db_path).unwrap();
-    let failed = get_scan_state(&reopened, "running").unwrap();
-    assert_eq!(failed.run.status, ScanStatus::Failed);
-    assert_eq!(failed.run.config["maxLineLength"], json!(80));
-    assert_eq!(failed.run.config["interrupted"], json!(true));
-    assert_eq!(
-        get_scan_state(&reopened, "canceling").unwrap().run.status,
-        ScanStatus::Canceled
-    );
+    let recovery_message = "scan was interrupted before completion; the original failure reason is unavailable. Please retry the scan.";
+    for id in ["running", "queued", "paused"] {
+        let failed = get_scan_state(&reopened, id).unwrap();
+        assert_eq!(failed.run.status, ScanStatus::Failed);
+        assert_eq!(
+            failed.run.failure_message.as_deref(),
+            Some(recovery_message)
+        );
+        assert!(failed.run.completed_at.is_some());
+        assert_eq!(failed.run.config["maxLineLength"], json!(80));
+        assert_eq!(failed.run.config["enabledAnalyzers"], json!(["ruff"]));
+        assert_eq!(
+            failed.run.config["excludedDirectories"],
+            json!(["Generated"])
+        );
+        assert_eq!(failed.run.config["interrupted"], json!(true));
+    }
+    let canceled = get_scan_state(&reopened, "canceling").unwrap().run;
+    assert_eq!(canceled.status, ScanStatus::Canceled);
+    assert!(canceled.failure_message.is_none());
+    let completed = get_scan_state(&reopened, "completed").unwrap().run;
+    assert_eq!(completed.status, ScanStatus::Completed);
+    assert!(completed.failure_message.is_none());
     assert!(!abandoned.exists());
     assert!(unrelated.exists());
+    let recovered = get_scan_state(&reopened, "running").unwrap().run;
+    drop(reopened);
+    let reopened_again = AppState::open(db_path).unwrap();
+    assert_eq!(
+        get_scan_state(&reopened_again, "running").unwrap().run,
+        recovered
+    );
 }

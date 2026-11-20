@@ -116,6 +116,7 @@ mod tests {
                 status: ScanStatus::Completed,
                 started_at: None,
                 completed_at: None,
+                failure_message: None,
                 config: json!({}),
                 rule_version: "test-rules".into(),
                 analyzer_versions: json!({}),
@@ -133,6 +134,21 @@ mod tests {
 
     fn render_issues(issues: Vec<Issue>) -> Value {
         serde_json::from_str(&render(&snapshot(issues)).expect("sarif render")).expect("sarif json")
+    }
+
+    #[test]
+    fn scan_failure_diagnostics_are_not_exported_to_sarif() {
+        let mut snapshot = snapshot(Vec::new());
+        snapshot.run.status = ScanStatus::Failed;
+        snapshot.run.failure_message = Some("private diagnostic sentinel".into());
+        let text = render(&snapshot).unwrap();
+        assert!(!text.contains("private diagnostic sentinel"));
+        assert!(!text.contains("failureMessage"));
+        let log: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            log["runs"][0]["invocations"][0]["executionSuccessful"],
+            false
+        );
     }
 
     #[test]

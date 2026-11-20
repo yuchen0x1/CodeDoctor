@@ -10,7 +10,7 @@ use crate::domain::types::{
     AnalyzerRun, AnalyzerStatus, ArchitectureEdge, CoverageKind, FileRecord, Issue, ScanStatus,
     Severity,
 };
-use crate::error::AppError;
+use crate::error::{AppError, scan_failure_message};
 use crate::import::path::{DiscoveredFile, canonical_project_path, collect_files_checked};
 use crate::import::zip::{extract_zip_checked, unique_temp_dir};
 use crate::index::MAX_SOURCE_FILE_BYTES;
@@ -190,7 +190,11 @@ pub fn run_scan_job(
         let (status, event_status, message) = if handle.cancel.load(Ordering::Relaxed) {
             (ScanStatus::Canceled, "canceled", "扫描已取消".to_owned())
         } else if let Err(error) = &result {
-            (ScanStatus::Failed, "failed", format!("扫描失败：{error}"))
+            (
+                ScanStatus::Failed,
+                "failed",
+                format!("扫描失败：{}", scan_failure_message(&error.to_string())),
+            )
         } else {
             (ScanStatus::Completed, "completed", "扫描完成".to_owned())
         };
@@ -200,6 +204,7 @@ pub fn run_scan_job(
             &now_millis().to_string(),
             ctx.total,
             ctx.indexed,
+            result.as_ref().err(),
         )?;
         ctx.processed = ctx.indexed;
         Ok::<_, AppError>((event_status, message))

@@ -146,6 +146,7 @@ mod tests {
             status,
             started_at: Some("2026-11-18T00:00:00Z".to_owned()),
             completed_at: None,
+            failure_message: None,
             config: json!({}),
             rule_version: "rules-1".to_owned(),
             analyzer_versions: json!({}),

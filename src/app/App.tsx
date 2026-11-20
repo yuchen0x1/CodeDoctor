@@ -682,15 +682,20 @@ function Scans({ run, event, status, analyzers, canRetry, onPause, onResume, onC
   const progress = status === "completed" ? 100 : total ? Math.min(100, Math.round(processed / total * 100)) : 0;
   const canPause = status === "running" || status === "paused";
   const canCancel = scanActive(status) && status !== "canceling";
+  const failureMessage = status === "failed"
+    ? run?.run.failureMessage || (event?.status === "failed" ? event.message : null)
+      || "扫描失败。此任务未记录详细原因，请按原设置重新扫描。"
+    : null;
   const analyzerLabels: Record<AnalyzerRun["status"], string> = {
     available: "可用", executed: "已运行", failed: "运行失败", skipped: "已跳过", unavailable: "不可用",
   };
   return <div className="page-stack">
     <section className="panel dashboard-detail">
       <div className="section-heading">
-        <div><h2>{run ? "扫描 " + run.run.id.slice(-12) : "等待扫描任务"}</h2>{event?.message && <p className="muted">{event.message}</p>}</div>
+        <div><h2>{run ? "扫描 " + run.run.id.slice(-12) : "等待扫描任务"}</h2>{!failureMessage && event?.message && <p className="muted">{event.message}</p>}</div>
         {run && <span className="pill pill--cyan">{scanStatusLabels[status]}</span>}
       </div>
+      {failureMessage && <p className="alert alert--error" role="alert">{failureMessage}</p>}
       {run ? <>
         <div className="progress-meta">
           <strong>{status === "completed" ? "结果已保存" : stageNames[event?.stage || ""] || scanStatusLabels[status]}</strong>
