@@ -21,3 +21,5 @@ jobs:
       - run: cargo install cargo-audit --version 0.23.0 --locked
       - name: Audit Windows Rust dependencies
         run: cargo audit --file src-tauri/Cargo.lock --target-arch x86_64 --target-os windows
+      - name: Audit Linux CLI Rust dependencies
+        run: cargo audit --file src-tauri/Cargo.lock --target-arch x86_64 --target-os linux

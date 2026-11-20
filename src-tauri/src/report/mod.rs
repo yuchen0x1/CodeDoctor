@@ -199,6 +199,118 @@ mod tests {
     }
 
     #[test]
+    fn html_is_a_standalone_zh_cn_document() {
+        let text = render(&snapshot(), ReportFormat::Html).unwrap();
+        assert!(text.starts_with("<!doctype html>\n<html lang=\"zh-CN\">"));
+        assert!(text.contains("<meta charset=\"utf-8\">"));
+        assert!(
+            text.contains(
+                "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            )
+        );
+        assert!(text.contains("<meta name=\"color-scheme\" content=\"light dark\">"));
+        assert!(text.contains("<title>CodeDoctor 扫描报告 - p / run</title>"));
+        assert!(text.contains("<style>"));
+        assert!(text.trim_end().ends_with("</html>"));
+        // 完整文档结构：摘要、评分维度、问题三个语义区块，样式内联、无外部引用。
+        assert_eq!(text.matches("<section").count(), 3);
+        assert!(text.contains("<main>"));
+        assert!(text.contains("aria-labelledby=\"summary-heading\""));
+        assert!(text.contains("aria-labelledby=\"dimensions-heading\""));
+        assert!(text.contains("aria-labelledby=\"issues-heading\""));
+        assert!(!text.contains("<script"));
+        assert!(!text.contains("src="));
+        assert!(!text.contains("href="));
+        assert!(!text.contains("@import"));
+        assert!(!text.contains("url("));
+    }
+
+    #[test]
+    fn html_escapes_script_and_style_payloads() {
+        let mut scan = snapshot();
+        scan.issues[0].title = "</title><script>alert(1)</script>".into();
+        scan.issues[0].evidence = "</pre><style>body{display:none}</style>".into();
+        scan.issues[0].explanation = "</p><img src=x onerror=alert(2)>".into();
+        scan.run.id = "\"onmouseover=alert(3)".into();
+        scan.run.project_id = "<iframe src=javascript:alert(4)>".into();
+        let text = render(&scan, ReportFormat::Html).unwrap();
+        assert!(text.contains("&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(text.contains("&lt;/pre&gt;&lt;style&gt;body{display:none}&lt;/style&gt;"));
+        assert!(text.contains("&lt;/p&gt;&lt;img src=x onerror=alert(2)&gt;"));
+        assert!(text.contains("&quot;onmouseover=alert(3)"));
+        assert!(text.contains("&lt;iframe src=javascript:alert(4)&gt;"));
+        assert!(!text.contains("<script"));
+        assert!(!text.contains("<style>body"));
+        assert!(!text.contains("<img"));
+        assert!(!text.contains("<iframe"));
+    }
+
+    #[test]
+    fn html_exposes_issue_count_and_all_issue_fields() {
+        let text = render(&snapshot(), ReportFormat::Html).unwrap();
+        assert!(text.contains("问题 <strong>1</strong>"));
+        assert!(text.contains("行列 <code>4:1, 4:6</code>"));
+        assert!(text.contains("来源 <code>codedoctor</code>"));
+        assert!(text.contains("覆盖 <code>AST</code>"));
+        assert!(text.contains("可信度 90%"));
+        assert!(text.contains("<pre><code>password = &#39;x&#39;</code></pre>"));
+        assert!(text.contains("影响：impact"));
+        assert!(text.contains("建议：fix"));
+        let empty = ScanSnapshot {
+            issues: vec![],
+            ..snapshot()
+        };
+        let text = render(&empty, ReportFormat::Html).unwrap();
+        assert!(text.contains("问题 <strong>0</strong>"));
+        assert!(text.contains("class=\"empty\""));
+    }
+
+    #[test]
+    fn html_css_supports_theme_responsive_and_print() {
+        let css = include_str!("report.css");
+        let text = render(&snapshot(), ReportFormat::Html).unwrap();
+        assert!(text.contains(css));
+        assert!(css.contains("@media (prefers-color-scheme: dark)"));
+        assert!(css.contains("@media (max-width: 640px)"));
+        assert!(css.contains("@media print"));
+        let print = css.split("@media print").nth(1).unwrap();
+        for declaration in [
+            "color-scheme: light;",
+            "--bg-raised: #ffffff;",
+            "--text: #000000;",
+            "--code-text: #263d58;",
+            "--high: #913b09;",
+        ] {
+            assert!(
+                print.contains(declaration),
+                "missing print override: {declaration}"
+            );
+        }
+        assert!(css.contains("color-scheme: light dark"));
+        let dark = css
+            .split("@media (prefers-color-scheme: dark)")
+            .nth(1)
+            .unwrap()
+            .split("* { box-sizing")
+            .next()
+            .unwrap();
+        for line in dark.lines() {
+            if let Some((token, _)) = line.trim().split_once(':')
+                && token.starts_with("--")
+            {
+                assert!(
+                    print.contains(&format!("{token}:")),
+                    "missing print token: {token}"
+                );
+            }
+        }
+        // 独立样式：不依赖应用 CSS，也不引入外部资源。
+        assert!(css.contains("--font-mono"));
+        assert!(!css.contains("var(--color-"));
+        assert!(!css.contains("http"));
+    }
+
+    #[test]
     fn txt_preserves_source_evidence_characters() {
         let mut scan = snapshot();
         scan.issues[0].evidence = "print(`template`) # source comment".into();

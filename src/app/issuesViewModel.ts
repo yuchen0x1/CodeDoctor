@@ -25,6 +25,7 @@ const languageByExtension: Record<string, string> = {
   cc: "C++",
   cjs: "JavaScript",
   cpp: "C++",
+  cts: "TypeScript",
   cxx: "C++",
   cs: "C#",
   css: "CSS",
@@ -34,6 +35,7 @@ const languageByExtension: Record<string, string> = {
   htm: "HTML",
   html: "HTML",
   java: "Java",
+  json: "JSON",
   js: "JavaScript",
   jsx: "JavaScript",
   kt: "Kotlin",
@@ -44,6 +46,8 @@ const languageByExtension: Record<string, string> = {
   ps1: "PowerShell",
   psm1: "PowerShell",
   py: "Python",
+  pyi: "Python",
+  pyw: "Python",
   rs: "Rust",
   scss: "SCSS",
   bash: "Shell",
@@ -64,7 +68,8 @@ const lower = (value: string) => value.toLowerCase();
 
 export function languageForIssuePath(filePath: string): string {
   const name = normalizePath(filePath).split("/").pop() || "";
-  const extension = name.includes(".") ? name.split(".").pop()?.toLocaleLowerCase() : undefined;
+  if (name.toLowerCase() === "dockerfile") return "Dockerfile";
+  const extension = name.includes(".") ? name.split(".").pop()?.toLowerCase() : undefined;
   return extension ? languageByExtension[extension] || "Other" : "Other";
 }
 

@@ -7,13 +7,18 @@ CodeDoctor 是离线优先的代码质量体检工具。Windows 桌面工作台�
 
 ## 最新更新
 
-### 0.2.0（2026-11-18）
+### 0.2.1（2026-11-20）
 
+- 修复文件末行未换行时列号失真，并使旧规则缓存失效，避免继续复用错误位置。
+- 修复启动恢复覆盖手动导入、历史报告选择被后台刷新重置、评分失败隐藏问题、语言筛选遗漏和更新偏好存储异常。
+- 升级 Tauri API/CLI 补丁版本，补充前端竞态回归测试、Linux 依赖审计与隔离的 MSI 升级验证。
+- 修复 Windows 下并行 ZIP 测试的临时目录冲突，避免测试互相删除文件。
+- 统一双主题、交互状态和窄窗布局，补齐键盘/无障碍语义；HTML 导出支持独立双主题和打印样式。
 - Windows 设置页可检查版本，安装版支持验证签名的应用内更新。
 - Linux x64 CLI 可在终端和 CI 扫描目录或 ZIP，并按严重度设置门禁。
 - 新增 SARIF 2.1.0 报告，可导入支持该格式的审阅工具。
 
-详见[更新记录](docs/releases/release-notes.md)。
+详见[更新记录](docs/releases/release-notes.md)与[UI/UX 工程改造验收报告](docs/qa/ui-ux-audit-2026-11-20.md)。
 
 ## Windows 安装与启动
 
@@ -21,8 +26,8 @@ CodeDoctor 是离线优先的代码质量体检工具。Windows 桌面工作台�
 
 | 产物 | 用法 |
 | --- | --- |
-| `bundle/nsis/CodeDoctor_0.2.0_x64-setup.exe` | 双击，按向导完成当前用户安装 |
-| `bundle/msi/CodeDoctor_0.2.0_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
+| `bundle/nsis/CodeDoctor_0.2.1_x64-setup.exe` | 双击，按向导完成当前用户安装 |
+| `bundle/msi/CodeDoctor_0.2.1_x64_en-US.msi` | 双击，通过 Windows Installer 安装 |
 | `codedoctor.exe` | 直接运行，免安装 |
 
 应用需要 Microsoft Edge WebView2 Runtime。免安装版也使用当前用户的本地扫描数据库，详情见[隐私与数据边界](docs/privacy.md)。

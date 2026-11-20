@@ -1,393 +1,76 @@
-.architecture-view {
-  display: grid;
-  gap: 14px;
-  min-width: 0;
-}
-
+.architecture-view { display: grid; gap: 16px; min-width: 0; }
 .architecture-view__heading,
 .architecture-view__stats,
 .architecture-view__filters,
-.architecture-view__body,
 .architecture-view__legend,
-.architecture-view__degree {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.architecture-view__degree { display: flex; align-items: center; gap: 12px; }
+.architecture-view__heading { flex-wrap: wrap; justify-content: space-between; align-items: flex-start; padding: 20px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-panel); }
+.architecture-view__heading > div { min-width: 0; }
+.architecture-view__heading h2, .architecture-view__heading p { margin: 0; }
+.architecture-view__muted, .architecture-view__caption { color: var(--color-text-faint); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+.architecture-view__stats { flex-wrap: wrap; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.architecture-view__stats span { padding: 6px 9px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.architecture-view__stats strong { margin-right: 4px; color: var(--color-text); font-size: 15px; }
+.architecture-view__coverage { display: flex; gap: 10px; padding: 12px; border: 1px solid var(--color-warning); border-radius: var(--radius-md); color: var(--color-warning); background: var(--color-warning-bg); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+.architecture-view__coverage strong { flex: none; }
+.architecture-view__error, .architecture-view__empty { padding: 22px; border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-text-muted); background: var(--color-panel); }
+.architecture-view__error { border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg); }
+.architecture-view__empty h2, .architecture-view__empty h3, .architecture-view__empty p { margin: 0; }
+.architecture-view__empty p { margin-top: 5px; color: var(--color-text-faint); }
+.architecture-view__filters { flex-wrap: wrap; padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-panel); }
+.architecture-view__filters label { display: grid; flex: 1 1 160px; min-width: 0; gap: 6px; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.architecture-view__filters input:not([type="checkbox"]), .architecture-view__filters select { width: 100%; min-width: 0; min-height: var(--control-height); padding: 8px 10px; border: 1px solid var(--color-control-border); border-radius: var(--radius-sm); color: var(--color-text); background: var(--color-control); font: inherit; }
+.architecture-view__filters .architecture-view__check { display: flex; flex: 0 1 auto; align-items: center; align-self: flex-end; min-height: var(--control-height); padding: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.architecture-view__check input { accent-color: var(--color-accent); }
+.architecture-view__body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 310px); align-items: stretch; gap: 16px; min-width: 0; }
+.architecture-view__canvas-wrap, .architecture-view__inspector, .architecture-view__cycles { min-width: 0; padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-panel); }
+.architecture-view__canvas-wrap { display: flex; flex-direction: column; }
+.architecture-view__legend { flex-wrap: wrap; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.architecture-view__legend span { display: flex; align-items: center; gap: 6px; }
+.architecture-view__legend-line { display: inline-block; width: 20px; height: 2px; background: var(--color-graph-edge); }
+.architecture-view__legend-line--cycle { background: var(--color-graph-cycle); }
+.architecture-view__legend-line--clone { border-top: 2px dashed var(--color-graph-clone); background: none; }
+.architecture-view__canvas { display: block; width: 100%; min-height: 360px; margin-block: 12px; overflow: visible; }
+.architecture-view__canvas marker path { fill: var(--color-graph-edge); }
+.architecture-view__edge { stroke: var(--color-graph-edge); stroke-width: 1.8; }
+.architecture-view__edge--cycle { stroke: var(--color-graph-cycle); stroke-width: 2.5; }
+.architecture-view__edge--clone { stroke: var(--color-graph-clone); stroke-dasharray: 5 3; }
+.architecture-view__node { cursor: pointer; }
+.architecture-view__node circle { fill: var(--color-graph-node); stroke: var(--color-graph-edge); stroke-width: 2.5; }
+.architecture-view__node text { fill: var(--color-text-muted); font-size: 14px; paint-order: stroke; stroke: var(--color-graph-label-halo); stroke-width: 3px; stroke-linejoin: round; }
+.architecture-view__node:hover circle { stroke-width: 4; }
+.architecture-view__node--selected circle { fill: var(--color-graph-selected); stroke: var(--color-graph-selected-border); stroke-width: 4; }
+.architecture-view__node--cycle circle { stroke: var(--color-graph-cycle); }
+.architecture-view__node--selected text { fill: var(--color-text); font-weight: 600; }
+.architecture-view__node:focus-visible { outline: none; }
+.architecture-view__node:focus-visible circle { stroke: var(--color-focus); stroke-width: 6; stroke-dasharray: 3 2; }
+.architecture-view__caption { margin: auto 0 0; }
+.architecture-view__inspector { display: flex; flex-direction: column; gap: 10px; }
+.architecture-view__inspector h3, .architecture-view__inspector h4, .architecture-view__cycles h3 { margin: 0; }
+.architecture-view__inspector h4 { margin-top: 6px; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.architecture-view__path { overflow-wrap: anywhere; color: var(--color-accent); font: var(--font-size-xs)/1.6 var(--font-mono); }
+.architecture-view__degree { flex-wrap: wrap; color: var(--color-text-muted); font-size: var(--font-size-xs); }
+.architecture-view__degree b { margin-left: 4px; color: var(--color-text); }
+.architecture-view__cycle-note { padding: 8px; border: 1px solid var(--color-error); border-radius: var(--radius-sm); color: var(--color-error); background: var(--color-error-bg); font-size: var(--font-size-xs); }
+.architecture-view__edge-list, .architecture-view__node-list { display: grid; gap: 6px; margin: 0; padding: 4px; list-style: none; }
+.architecture-view__edge-list { max-height: 160px; overflow: auto; }
+.architecture-view__edge-list button, .architecture-view__node-row { display: flex; width: 100%; min-width: 0; min-height: 36px; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; padding: 8px; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); background: transparent; text-align: left; cursor: pointer; }
+.architecture-view__edge-list button:hover, .architecture-view__node-row:hover, .architecture-view__node-row--selected { border-color: var(--color-border-strong); color: var(--color-text); background: var(--color-panel-muted); }
+.architecture-view__edge-list button:active, .architecture-view__node-row:active { background: var(--color-control-pressed); }
+.architecture-view__edge-list span, .architecture-view__node-row span { min-width: 0; overflow-wrap: anywhere; font: var(--font-size-xs)/1.5 var(--font-mono); }
+.architecture-view__edge-list small, .architecture-view__node-row small { flex: none; color: var(--color-text-faint); font-size: var(--font-size-xs); }
+.architecture-view__node-heading { margin-top: 10px !important; }
+.architecture-view__node-list { max-height: 240px; overflow: auto; }
+.architecture-view__cycles { display: grid; gap: 10px; }
+.architecture-view__cycles article { padding: 12px; border-left: 3px solid var(--color-graph-cycle); background: var(--color-error-bg); }
+.architecture-view__cycles article p { margin: 5px 0 0; overflow-wrap: anywhere; color: var(--color-text-muted); font: var(--font-size-xs)/1.6 var(--font-mono); }
+@media (max-width: 1200px) {
+  .architecture-view__body { grid-template-columns: minmax(0, 1fr); }
+  .architecture-view__canvas { min-height: 330px; }
+  .architecture-view__inspector { width: 100%; }
 }
-
-.architecture-view__heading {
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 18px 20px;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-panel);
-}
-
-.architecture-view__heading h2,
-.architecture-view__heading p {
-  margin: 0;
-}
-
-.architecture-view__muted,
-.architecture-view__caption {
-  color: var(--color-text-faint);
-  font-size: 12px;
-}
-
-.architecture-view__stats {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-.architecture-view__stats span {
-  padding: 6px 9px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-}
-
-.architecture-view__stats strong {
-  margin-right: 4px;
-  color: var(--color-text);
-  font-size: 15px;
-}
-
-.architecture-view__coverage {
-  display: flex;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid rgba(251, 191, 36, .38);
-  border-radius: 7px;
-  color: #fde68a;
-  background: rgba(120, 85, 15, .16);
-  font-size: 12px;
-}
-
-.architecture-view__coverage strong {
-  white-space: nowrap;
-}
-
-.architecture-view__error,
-.architecture-view__empty {
-  padding: 22px;
-  border: 1px solid var(--color-border);
-  border-radius: 9px;
-  color: var(--color-text-muted);
-  background: var(--color-panel);
-}
-
-.architecture-view__error {
-  border-color: rgba(248, 113, 113, .45);
-  color: #fecaca;
-}
-
-.architecture-view__empty h2,
-.architecture-view__empty h3,
-.architecture-view__empty p {
-  margin: 0;
-}
-
-.architecture-view__empty p {
-  margin-top: 5px;
-  color: var(--color-text-faint);
-}
-
-.architecture-view__filters {
-  flex-wrap: wrap;
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-panel);
-}
-
-.architecture-view__filters label {
-  display: flex;
-  flex: 1 1 150px;
-  align-items: center;
-  gap: 8px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-.architecture-view__filters input:not([type="checkbox"]),
-.architecture-view__filters select {
-  min-width: 90px;
-  flex: 1;
-  padding: 7px 9px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text);
-  background: #0d1829;
-  font: inherit;
-}
-
-.architecture-view__filters .architecture-view__check {
-  flex: 0 0 auto;
-}
-
-.architecture-view__check input {
-  accent-color: var(--color-accent);
-}
-
-.architecture-view__body {
-  align-items: stretch;
-  min-height: 500px;
-}
-
-.architecture-view__canvas-wrap,
-.architecture-view__inspector,
-.architecture-view__cycles {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 9px;
-  background: var(--color-panel);
-}
-
-.architecture-view__canvas-wrap {
-  position: relative;
-  flex: 1;
-  overflow: hidden;
-}
-
-.architecture-view__legend {
-  position: absolute;
-  top: 13px;
-  left: 14px;
-  flex-wrap: wrap;
-  color: var(--color-text-faint);
-  font-size: 11px;
-}
-
-.architecture-view__legend span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.architecture-view__legend-line {
-  display: inline-block;
-  width: 20px;
-  height: 2px;
-  background: var(--color-accent);
-}
-
-.architecture-view__legend-line--cycle {
-  background: #fb7185;
-}
-
-.architecture-view__legend-line--clone {
-  border-top: 2px dashed #c4b5fd;
-  background: none;
-}
-
-.architecture-view__canvas {
-  display: block;
-  width: 100%;
-  min-height: 420px;
-  margin-top: 16px;
-  overflow: visible;
-}
-
-.architecture-view__canvas marker path {
-  fill: #60a5fa;
-}
-
-.architecture-view__edge {
-  stroke: #38bdf8;
-  stroke-width: 1.4;
-  opacity: .58;
-}
-
-.architecture-view__edge--cycle {
-  stroke: #fb7185;
-  stroke-width: 2;
-  opacity: .9;
-}
-
-.architecture-view__edge--clone {
-  stroke: #c4b5fd;
-  stroke-dasharray: 5 3;
-  opacity: .8;
-}
-
-.architecture-view__node {
-  cursor: pointer;
-}
-
-.architecture-view__node circle {
-  fill: #133451;
-  stroke: #38bdf8;
-  stroke-width: 2;
-}
-
-.architecture-view__node text {
-  fill: var(--color-text-muted);
-  font-size: 11px;
-  paint-order: stroke;
-  stroke: #101a2b;
-  stroke-width: 3px;
-  stroke-linejoin: round;
-}
-
-.architecture-view__node--selected circle {
-  fill: #0e7490;
-  stroke: #a5f3fc;
-  stroke-width: 3;
-}
-
-.architecture-view__node--cycle circle {
-  stroke: #fb7185;
-}
-
-.architecture-view__node:focus-visible circle {
-  stroke: #f8fafc;
-  stroke-width: 4;
-}
-
-.architecture-view__caption {
-  margin: 0;
-}
-
-.architecture-view__inspector {
-  display: flex;
-  width: min(310px, 34%);
-  flex-direction: column;
-  gap: 8px;
-}
-
-.architecture-view__inspector h3,
-.architecture-view__inspector h4,
-.architecture-view__cycles h3 {
-  margin: 0;
-}
-
-.architecture-view__inspector h4 {
-  margin-top: 6px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-.architecture-view__path {
-  overflow-wrap: anywhere;
-  color: var(--color-accent);
-  font: 12px/1.5 var(--font-mono);
-}
-
-.architecture-view__degree {
-  flex-wrap: wrap;
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-.architecture-view__degree b {
-  margin-left: 4px;
-  color: var(--color-text);
-}
-
-.architecture-view__cycle-note {
-  padding: 7px 8px;
-  border: 1px solid rgba(251, 113, 133, .4);
-  border-radius: 6px;
-  color: #fecdd3;
-  background: rgba(190, 24, 93, .12);
-  font-size: 11px;
-}
-
-.architecture-view__edge-list,
-.architecture-view__node-list {
-  display: grid;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.architecture-view__edge-list {
-  max-height: 120px;
-  overflow: auto;
-}
-
-.architecture-view__edge-list button,
-.architecture-view__node-row {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 7px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  color: var(--color-text-muted);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.architecture-view__edge-list button:hover,
-.architecture-view__node-row:hover,
-.architecture-view__node-row--selected {
-  border-color: var(--color-border-strong);
-  color: var(--color-text);
-  background: var(--color-panel-muted);
-}
-
-.architecture-view__edge-list span,
-.architecture-view__node-row span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: 11px var(--font-mono);
-}
-
-.architecture-view__edge-list small,
-.architecture-view__node-row small {
-  flex: none;
-  color: var(--color-text-faint);
-  font-size: 10px;
-}
-
-.architecture-view__node-heading {
-  margin-top: 10px !important;
-}
-
-.architecture-view__node-list {
-  max-height: 180px;
-  overflow: auto;
-}
-
-.architecture-view__cycles {
-  display: grid;
-  gap: 8px;
-}
-
-.architecture-view__cycles article {
-  padding: 10px;
-  border-left: 2px solid #fb7185;
-  background: rgba(127, 29, 29, .12);
-}
-
-.architecture-view__cycles article p {
-  margin: 5px 0 0;
-  overflow-wrap: anywhere;
-  color: var(--color-text-muted);
-  font: 11px/1.5 var(--font-mono);
-}
-
-@media (max-width: 900px) {
-  .architecture-view__body {
-    flex-direction: column;
-  }
-
-  .architecture-view__inspector {
-    width: auto;
-  }
-
-  .architecture-view__canvas {
-    min-height: 330px;
-  }
+@media (max-width: 480px) {
+  .architecture-view__heading, .architecture-view__canvas-wrap, .architecture-view__inspector, .architecture-view__cycles { padding: 12px; }
+  .architecture-view__coverage { flex-direction: column; gap: 4px; }
+  .architecture-view__canvas { min-height: 250px; }
 }
