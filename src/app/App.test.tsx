@@ -100,6 +100,11 @@ const choose = (label: string, value: string) => act(async () => {
   select(label).value = value;
   select(label).dispatchEvent(new Event("change", { bubbles: true }));
 });
+const reportDestination = () => container.querySelector<HTMLInputElement>('input[aria-label="报告保存路径"]')!;
+const enterReportDestination = (value: string) => act(async () => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(reportDestination(), value);
+  reportDestination().dispatchEvent(new Event("input", { bubbles: true }));
+});
 
 describe("project restoration", () => {
   it.each(["before", "after"])("does not restore the startup project when its list arrives %s explicit import completion", async (order) => {
@@ -154,48 +159,6 @@ describe("project restoration", () => {
 });
 
 describe("history selections", () => {
-  it.each(["cancel", "accept"])("locks the report controls during the picker and handles %s", async (outcome) => {
-    const pending = deferred<string | null>();
-    vi.mocked(pickReportDestination).mockResolvedValueOnce("C:/old.sarif").mockReturnValueOnce(pending.promise);
-    await mount();
-    await click("历史报告");
-    await choose("报告格式", "sarif");
-    await click("选择保存位置");
-    await click("选择保存位置");
-    expect(pickReportDestination).toHaveBeenLastCalledWith("sarif");
-    const path = container.querySelector<HTMLInputElement>('input[aria-label="报告保存路径"]')!;
-    expect(path.disabled).toBe(true);
-    expect(select("报告格式").disabled).toBe(true);
-    expect(select("报告快照").disabled).toBe(true);
-    expect(button("选择保存位置").disabled).toBe(true);
-    expect(button("导出报告").disabled).toBe(true);
-    await click("导出报告");
-    expect(bridge.exportReport).not.toHaveBeenCalled();
-    const selectedPath = outcome === "accept" ? "C:/new.sarif" : null;
-    await act(async () => pending.resolve(selectedPath));
-    expect(path.disabled).toBe(false);
-    expect(path.value).toBe(selectedPath ?? "C:/old.sarif");
-    await click("导出报告");
-    expect(bridge.exportReport).toHaveBeenCalledWith("scan-3", "sarif", selectedPath ?? "C:/old.sarif");
-  });
-
-  it("ignores a report destination returned after switching projects", async () => {
-    const pending = deferred<string | null>();
-    vi.mocked(pickReportDestination).mockReturnValue(pending.promise);
-    await mount();
-    await click("历史报告");
-    await click("选择保存位置");
-    await click("项目体检");
-    await click("选择项目文件夹");
-    await act(async () => pending.resolve("C:/project-a.md"));
-    await click("历史报告");
-    const path = container.querySelector<HTMLInputElement>('input[aria-label="报告保存路径"]')!;
-    expect(path.value).toBe("");
-    expect(path.disabled).toBe(false);
-    expect(button("导出报告").disabled).toBe(true);
-    expect(bridge.exportReport).not.toHaveBeenCalled();
-  });
-
   it("keeps chosen snapshots when delayed score loading refreshes history and exports the chosen snapshot", async () => {
     const score = deferred<ReportResult>();
     vi.mocked(bridge.calculateReport).mockReturnValue(score.promise);
@@ -235,6 +198,161 @@ describe("history selections", () => {
     expect(button("比较快照").disabled).toBe(false);
     expect(container.querySelector(".history-summary")).toBeNull();
     expect(container.textContent).not.toContain("质量分变化");
+  });
+});
+
+describe("report save dialog", () => {
+  it("locks report controls and synchronously prevents duplicate dialogs and exports", async () => {
+    const picker = deferred<string | null>();
+    vi.mocked(pickReportDestination).mockReturnValue(picker.promise);
+    await mount();
+    await click("历史报告");
+    await choose("报告快照", "scan-1");
+    await enterReportDestination("C:/existing.md");
+    await act(async () => {
+      button("选择保存位置").click();
+      button("选择保存位置").click();
+      select("报告格式").value = "sarif";
+      select("报告格式").dispatchEvent(new Event("change", { bubbles: true }));
+      select("报告快照").value = "scan-2";
+      select("报告快照").dispatchEvent(new Event("change", { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(reportDestination(), "C:/changed.sarif");
+      reportDestination().dispatchEvent(new Event("input", { bubbles: true }));
+      button("导出报告").click();
+    });
+    expect(pickReportDestination).toHaveBeenCalledTimes(1);
+    expect(pickReportDestination).toHaveBeenCalledWith("markdown");
+    expect(bridge.exportReport).not.toHaveBeenCalled();
+    expect(select("报告格式").disabled).toBe(true);
+    expect(select("报告格式").value).toBe("markdown");
+    expect(select("报告快照").disabled).toBe(true);
+    expect(select("报告快照").value).toBe("scan-1");
+    expect(reportDestination().disabled).toBe(true);
+    expect(reportDestination().value).toBe("C:/existing.md");
+    expect(button("选择保存位置").disabled).toBe(true);
+    expect(button("导出报告").disabled).toBe(true);
+    expect(select("基线扫描").disabled).toBe(false);
+    expect(select("目标扫描").disabled).toBe(false);
+    expect(button("比较快照").disabled).toBe(false);
+    await act(async () => picker.resolve("C:/chosen.md"));
+    expect(select("报告格式").disabled).toBe(false);
+    expect(select("报告快照").disabled).toBe(false);
+    expect(reportDestination().disabled).toBe(false);
+    expect(reportDestination().value).toBe("C:/chosen.md");
+    expect(button("选择保存位置").disabled).toBe(false);
+    expect(button("导出报告").disabled).toBe(false);
+    await click("导出报告");
+    expect(bridge.exportReport).toHaveBeenCalledWith("scan-1", "markdown", "C:/chosen.md");
+  });
+
+  it.each(["cancel", "failure"])("restores report controls after dialog %s and allows retry", async (result) => {
+    const picker = deferred<string | null>();
+    vi.mocked(pickReportDestination).mockReturnValueOnce(picker.promise).mockResolvedValue("C:/retry.sarif");
+    await mount();
+    await click("历史报告");
+    await choose("报告快照", "scan-1");
+    await enterReportDestination("C:/existing.md");
+    await click("选择保存位置");
+    expect(select("报告格式").disabled).toBe(true);
+    if (result === "cancel") await act(async () => picker.resolve(null));
+    else await act(async () => picker.reject(new Error("report picker failed")));
+    expect(select("报告格式").disabled).toBe(false);
+    expect(select("报告快照").disabled).toBe(false);
+    expect(select("报告快照").value).toBe("scan-1");
+    expect(reportDestination().disabled).toBe(false);
+    expect(reportDestination().value).toBe("C:/existing.md");
+    expect(button("选择保存位置").disabled).toBe(false);
+    expect(button("导出报告").disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')?.textContent ?? "").toBe(result === "failure" ? "report picker failed关闭" : "");
+    expect(bridge.exportReport).not.toHaveBeenCalled();
+    await choose("报告格式", "sarif");
+    expect(reportDestination().value).toBe("");
+    await choose("报告快照", "scan-2");
+    await enterReportDestination("C:/manual.sarif");
+    expect(reportDestination().value).toBe("C:/manual.sarif");
+    await click("选择保存位置");
+    expect(pickReportDestination).toHaveBeenCalledTimes(2);
+    expect(pickReportDestination).toHaveBeenNthCalledWith(2, "sarif");
+    expect(reportDestination().value).toBe("C:/retry.sarif");
+    await click("导出报告");
+    expect(bridge.exportReport).toHaveBeenCalledWith("scan-2", "sarif", "C:/retry.sarif");
+  });
+
+  it.each(["dialog", "comparison"])("keeps dialog pending separate from comparison busy when %s finishes first", async (first) => {
+    const picker = deferred<string | null>();
+    const comparison = deferred<HistoryDiff>();
+    vi.mocked(pickReportDestination).mockReturnValue(picker.promise);
+    vi.mocked(bridge.compareScanHistory).mockReturnValue(comparison.promise);
+    await mount();
+    await click("历史报告");
+    await click("选择保存位置");
+    expect(button("比较快照").disabled).toBe(false);
+    await click("比较快照");
+    expect(bridge.compareScanHistory).toHaveBeenCalledTimes(1);
+    if (first === "dialog") await act(async () => picker.resolve(null));
+    else await act(async () => comparison.resolve(diff));
+    expect(button("比较快照").disabled).toBe(first === "dialog");
+    expect(select("报告格式").disabled).toBe(true);
+    expect(button("选择保存位置").disabled).toBe(true);
+    if (first === "dialog") await act(async () => comparison.resolve(diff));
+    else await act(async () => picker.resolve(null));
+    expect(button("比较快照").disabled).toBe(false);
+    expect(select("报告格式").disabled).toBe(false);
+    expect(button("选择保存位置").disabled).toBe(false);
+  });
+
+  it.each([
+    ["path", "before"], ["error", "before"], ["path", "after"], ["error", "after"],
+  ])("ignores an old dialog %s returned %s project restoration completes", async (result, order) => {
+    const picker = deferred<string | null>();
+    const restored = deferred<ProjectSummary>();
+    const nextScans = scans.map((run) => ({ ...run, id: `B-${run.id}`, projectId: "B" }));
+    vi.mocked(bridge.listProjects).mockResolvedValue([record("A"), record("B")]);
+    vi.mocked(bridge.restoreProject).mockImplementation((id) => id === "B" ? restored.promise : Promise.resolve(project("A")));
+    vi.mocked(bridge.listScanRuns).mockImplementation(async (id) => id === "B" ? nextScans : scans);
+    vi.mocked(bridge.getScan).mockImplementation(async (id) => ({ run: [...scans, ...nextScans].find((run) => run.id === id)!, elapsedMs: 0 }));
+    vi.mocked(pickReportDestination).mockReturnValueOnce(picker.promise).mockResolvedValue("C:/B-report.md");
+    await mount();
+    await click("历史报告");
+    await enterReportDestination("C:/A-report.md");
+    await click("选择保存位置");
+    await click("总览仪表盘");
+    const projects = container.querySelector<HTMLSelectElement>(".saved-project-select select")!;
+    expect(projects.disabled).toBe(false);
+    await act(async () => {
+      projects.value = "B";
+      projects.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(bridge.restoreProject).toHaveBeenLastCalledWith("B");
+    if (order === "after") await act(async () => restored.resolve(project("B")));
+    await click("历史报告");
+    expect(select("报告格式").disabled).toBe(true);
+    expect(button("选择保存位置").disabled).toBe(true);
+    await click("选择保存位置");
+    expect(pickReportDestination).toHaveBeenCalledTimes(1);
+    if (result === "path") await act(async () => picker.resolve("C:/stale-A.md"));
+    else await act(async () => picker.reject(new Error("stale A picker error")));
+    expect(reportDestination().value).toBe(order === "before" ? "C:/A-report.md" : "");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(bridge.exportReport).not.toHaveBeenCalled();
+    if (order === "before") {
+      expect(button("比较快照").disabled).toBe(true);
+      expect(select("报告格式").disabled).toBe(true);
+      await act(async () => restored.resolve(project("B")));
+      await click("历史报告");
+    }
+    expect(container.querySelector(".topbar__subtitle")?.textContent).toContain("Project B");
+    expect(select("报告快照").value).toBe("B-scan-3");
+    expect(reportDestination().value).toBe("");
+    expect(select("报告格式").disabled).toBe(false);
+    expect(button("选择保存位置").disabled).toBe(false);
+    await click("选择保存位置");
+    expect(pickReportDestination).toHaveBeenCalledTimes(2);
+    expect(reportDestination().value).toBe("C:/B-report.md");
+    await click("导出报告");
+    expect(bridge.exportReport).toHaveBeenCalledWith("B-scan-3", "markdown", "C:/B-report.md");
+    expect(container.textContent).not.toContain("stale A picker error");
+    expect(container.textContent).not.toContain("C:/stale-A.md");
   });
 });
 

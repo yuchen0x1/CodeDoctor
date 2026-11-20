@@ -125,17 +125,18 @@
 
 平台适配见 [平台评估](platforms.md)。按 [维护流程](maintenance.md) 的周期复查版本、社区问题和许可证。上述第三方代码均作为参考。
 
-## 2026-11-21：报告交付复查
+## 2026-11-21 SARIF 与本地 CI 工作流复核
 
-本轮复查了桌面与 CLI 共享的 Rust 扫描入口和报告渲染器、React 历史页、SQLite 快照及迁移和 GitHub Actions 发布门禁。对照下列上游文档；没有复制第三方代码，也没有引入新的运行时依赖。没有使用相同数据集做跨工具跑分，不能据此判断绝对性能。
+本次另行核读以下公开仓库的 README、许可证及相关实现；只借鉴架构与互操作思路，不复制代码。没有安装或基准测试第三方工具。性能、Windows 适配与 CodeDoctor 报告在各消费端的呈现均未实测。
 
-| 维度 | CodeDoctor 当前行为 | 上游参考（许可证） | 取舍 |
-| --- | --- | --- | --- |
-| 功能 / 交付 | Windows 工作台与无 GUI 的 Linux CLI 共用 Rust 规则和报告 | [Cppcheck 手册](https://github.com/cppcheck-opensource/cppcheck/blob/main/man/manual.md)（GPL-3.0），GUI 和 CLI 共用分析，提供项目配置与机器报告 | 保留桌面审阅与 CLI 自动化分工 |
-| 互操作 / 性能 | 规则表和诊断由同一个 SARIF 渲染器导出；扫描已有文件规则缓存 | [PMD CLI](https://github.com/pmd/pmd/blob/main/docs/pages/pmd/userdocs/cli_reference.md)（[BSD 风格及部分 Apache-2.0](https://github.com/pmd/pmd/blob/main/docs/pages/license.md)），独立渲染格式及增量分析 | 本轮锁定规则索引、路径和行号契约；性能变更先做基准 |
-| UI / 数据 | SQLite 保留历史并支持比较；保存对话框异步返回 | [SpotBugs GUI](https://github.com/spotbugs/spotbugs/blob/master/docs/gui.rst)（LGPL-2.1），分析结果可独立保存和重开 | 导出动作绑定已选快照和格式，等待选择时锁定控件 |
-| 安全 / 扩展 | 默认内置离线规则；Ruff 是显式启用的本机适配器 | [Ruff 规则与修复](https://docs.astral.sh/ruff/linter/)（MIT），按稳定规则 ID 管理诊断，区分安全与非安全修复 | 保留规则身份，不引入自动改写或执行被扫描项目配置 |
-| 架构 | Tauri IPC 和 CLI 共用问题模型；前端负责交互 | [Biome](https://github.com/biomejs/biome#readme)（MIT 或 Apache-2.0），CLI 与编辑器集成共用诊断引擎 | 在共享渲染器修复，不在各终端重复转换 |
-| 工程 / 缓存 | 无用户可执行插件系统；结果和配置有回归测试 | [ESLint CLI](https://eslint.org/docs/latest/use/command-line-interface)（MIT），格式器、缓存和 dry-run 有明确边界 | 未来扩展优先声明式配置，先验证缓存失效和隔离 |
+| 项目与许可证 | 核验的设计 | 对 CodeDoctor 的启发 |
+| --- | --- | --- |
+| [semgrep/semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | [扫描入口](https://github.com/semgrep/semgrep/blob/cd3b439c36f43a299dffcd1e7544f6ce7ebb03cc/cli/src/semgrep/commands/scan.py)、本地机器报告与[基线比较](https://github.com/semgrep/semgrep/blob/cd3b439c36f43a299dffcd1e7544f6ce7ebb03cc/cli/src/semgrep/run_scan.py) | 门禁失败必须区别于分析执行失败；显式报告状态，不把失败的基线比较说成“没有新增发现”。 |
+| [biomejs/biome](https://github.com/biomejs/biome) · MIT / Apache-2.0 | [共享 workspace API](https://github.com/biomejs/biome/blob/73125bdb0326e211b796f1bf893e844609dc6b70/crates/biome_service/src/workspace.rs)，分离项目、诊断与代码操作 | 桌面和 CLI 继续复用同一 Rust 报告引擎；先测解析成本，再考虑增量缓存，不加常驻服务。 |
+| [trunk-io/plugins](https://github.com/trunk-io/plugins) · MIT | [Ruff 插件描述](https://github.com/trunk-io/plugins/blob/581fae83afe3b48e62faf1e35c89757d115efbb1/linters/ruff/plugin.yaml)声名版本、文件类型、命令和输出格式 | 扩展能力需显式约束版本和输入；不自动下载、执行项目钩子或接入任意命令。Trunk CLI 仓库本次未成功核验，未将插件仓许可证误作 CLI 许可证。 |
+| [SonarSource/sonarqube](https://github.com/SonarSource/sonarqube) · LGPL-3.0 | [质量门禁求值](https://github.com/SonarSource/sonarqube/blob/457cee5aabea2e1eabb151afb33f6c65a6e02e69/server/sonar-server-common/src/main/java/org/sonar/server/qualitygate/QualityGateEvaluatorImpl.java)和分析缓存 | 明确门禁条件和比较基线；保留 CodeDoctor 本地数据边界，不引入服务端。 |
+| [reviewdog/reviewdog](https://github.com/reviewdog/reviewdog) · MIT | [SARIF 解析](https://github.com/reviewdog/reviewdog/blob/f42d2a2763b3fee771905bdfe1b71269844c21e1/parser/sarif.go)及[变更行过滤](https://github.com/reviewdog/reviewdog/blob/f42d2a2763b3fee771905bdfe1b71269844c21e1/filter/filter.go) | 过滤展示范围不等于扫描基线；本次使用 OASIS schema 做验证，未声称已在 reviewdog 或 GitHub 实测呈现。 |
+| [Microsoft SARIF Tutorials](https://github.com/microsoft/sarif-tutorials) · 文档 CC BY-4.0、代码 MIT | [SARIF 字段样例](https://github.com/microsoft/sarif-tutorials/tree/819b0f62f47ecde9a8f24dfc387c41926f5edabe/samples)与[工具说明](https://github.com/microsoft/sarif-tutorials/blob/819b0f62f47ecde9a8f24dfc387c41926f5edabe/docs/Multitool.md) | 对照 OASIS 2.1.0 schema 验证报告；优先给出规则引用和可靠文件位置，不默认嵌入源码。 |
+| [Ericsson/codechecker](https://github.com/Ericsson/codechecker) · Apache-2.0 | [架构](https://github.com/Ericsson/codechecker/blob/53222cd5d7566c553d8d7edbb5134a35a56ef15e/docs/architecture.md)区分分析器、报告转换和可选 Web 服务 | 先支持安全的报告互操作；导入目录/ZIP 不触发构建或执行外部代码。 |
 
-升级队列：**P0** 持续验证签名更新与安装后 SQLite 恢复，本轮没有确认阻止交付的数据损坏；**P1** 修复报告规则索引、缺失证据和保存交互，并在 CLI CI 锁定契约；**P2** 用包含非 ASCII 字符的样本设计字符列转换，并为大量历史差异增加分页及可比较基准；**P3** 评估可审计的问题忽略、规则元数据和模块约束，维持离线默认。
+上述比较支持本次的低依赖改进：SARIF 结果引用去重的规则表、区分分析执行状态与门禁退出码，并避免输出猜测的位置；文件保存对话框只在其异步选择期间锁定对应表单。下一步应以真实消费端验证行级注释与跨扫描去重，再评估是否增加 SARIF 上传或新增问题基线门禁。

@@ -1,4 +1,4 @@
-use crate::domain::types::{Issue, Severity};
+use crate::domain::types::{Issue, ScanStatus, Severity};
 use crate::error::AppError;
 use crate::score::ScanSnapshot;
 use serde_json::{Value, json};
@@ -11,8 +11,8 @@ pub fn render(snapshot: &ScanSnapshot) -> Result<String, AppError> {
         .iter()
         .map(|issue| (issue.rule_id.as_str(), 0))
         .collect();
-    for (index, value) in rule_indexes.values_mut().enumerate() {
-        *value = index;
+    for (index, slot) in rule_indexes.values_mut().enumerate() {
+        *slot = index;
     }
     let rules: Vec<_> = rule_indexes.keys().map(|id| json!({"id": id})).collect();
     let results: Vec<_> = snapshot
@@ -30,6 +30,8 @@ pub fn render(snapshot: &ScanSnapshot) -> Result<String, AppError> {
                 "informationUri": "https://github.com/yuchen0x1/CodeDoctor",
                 "rules": rules,
             } },
+            "invocations": [{ "executionSuccessful": snapshot.run.status == ScanStatus::Completed }],
+            "properties": { "ruleVersion": snapshot.run.rule_version },
             "results": results,
         }],
     }))
@@ -54,7 +56,7 @@ fn result(issue: &Issue, rule_index: usize) -> Value {
     }
     if let Some(uri) = encode_relative_uri(&issue.file_path) {
         let mut physical = json!({ "artifactLocation": { "uri": uri } });
-        // Persisted columns can be byte offsets, not SARIF character columns.
+        // A missing line is not line 1, and stored UTF-8 byte columns are not SARIF columns.
         if issue.start_line > 0 {
             physical["region"] = json!({ "startLine": issue.start_line });
         }
@@ -81,13 +83,13 @@ fn encode_relative_uri(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::types::{CoverageKind, ScanRun, ScanStatus};
+    use crate::domain::types::{CoverageKind, ScanRun};
 
-    fn issue(rule_id: &str, severity: Severity, file_path: &str) -> Issue {
+    fn sample_issue(rule_id: &str, severity: Severity, file_path: &str) -> Issue {
         Issue {
-            id: String::new(),
+            id: format!("issue-{rule_id}-{file_path}"),
             rule_id: rule_id.to_owned(),
-            category: "quality".to_owned(),
+            category: "security".to_owned(),
             severity,
             file_path: file_path.to_owned(),
             start_line: 12,
@@ -99,15 +101,15 @@ mod tests {
             evidence: String::new(),
             impact: String::new(),
             recommendation: String::new(),
-            source: "builtin".to_owned(),
+            source: "rule".to_owned(),
             coverage: CoverageKind::Ast,
             confidence: 0.8,
             fingerprint: "fp-1".to_owned(),
         }
     }
 
-    fn render_run(issues: Vec<Issue>) -> Value {
-        let snapshot = ScanSnapshot {
+    fn snapshot(issues: Vec<Issue>) -> ScanSnapshot {
+        ScanSnapshot {
             run: ScanRun {
                 id: "run".into(),
                 project_id: "project".into(),
@@ -115,69 +117,123 @@ mod tests {
                 started_at: None,
                 completed_at: None,
                 config: json!({}),
-                rule_version: "test".into(),
+                rule_version: "test-rules".into(),
                 analyzer_versions: json!({}),
                 total_files: 1,
                 scanned_files: 1,
                 total_issues: issues.len() as u32,
             },
             issues,
-            edges: vec![],
+            edges: Vec::new(),
             file_count: 1,
             source_file_count: 1,
             evidence: Default::default(),
-        };
-        let log: Value = serde_json::from_str(&render(&snapshot).unwrap()).unwrap();
-        assert_eq!(log["version"], "2.1.0");
-        log["runs"][0].clone()
+        }
+    }
+
+    fn render_issues(issues: Vec<Issue>) -> Value {
+        serde_json::from_str(&render(&snapshot(issues)).expect("sarif render")).expect("sarif json")
     }
 
     #[test]
-    fn results_reference_the_sorted_deduplicated_rule_table() {
-        let run = render_run(vec![
-            issue("z.last", Severity::High, "src/测 试.py"),
-            issue("a.first", Severity::Medium, "src/main.py"),
-            issue("z.last", Severity::Info, "src/other.py"),
+    fn results_reference_sorted_unique_rules_without_reordering_findings() {
+        let log = render_issues(vec![
+            sample_issue("z.rule", Severity::High, "src/测 试#%.py"),
+            sample_issue("a.rule", Severity::Medium, "src/main.py"),
+            sample_issue("z.rule", Severity::Info, "src/other.py"),
         ]);
-        assert_eq!(
-            run["tool"]["driver"]["rules"],
-            json!([{ "id": "a.first" }, { "id": "z.last" }])
-        );
+        assert_eq!(log["version"], "2.1.0");
+        let run = &log["runs"][0];
+        let rules = &run["tool"]["driver"]["rules"];
+        assert_eq!(rules, &json!([{ "id": "a.rule" }, { "id": "z.rule" }]));
         for (result, (index, level)) in run["results"].as_array().unwrap().iter().zip([
             (1, "error"),
             (0, "warning"),
             (1, "note"),
         ]) {
             assert_eq!(result["ruleIndex"], index);
+            assert_eq!(result["ruleId"], rules[index as usize]["id"]);
             assert_eq!(result["level"], level);
-            assert_eq!(
-                result["ruleId"],
-                run["tool"]["driver"]["rules"][index as usize]["id"]
-            );
         }
         let first = &run["results"][0];
         assert_eq!(first["partialFingerprints"]["codedoctorIssue/v1"], "fp-1");
         let physical = &first["locations"][0]["physicalLocation"];
         assert_eq!(
             physical["artifactLocation"]["uri"],
-            "src/%E6%B5%8B%20%E8%AF%95.py"
+            "src/%E6%B5%8B%20%E8%AF%95%23%25.py"
         );
         assert_eq!(physical["region"], json!({ "startLine": 12 }));
+        assert_eq!(run["properties"]["ruleVersion"], "test-rules");
     }
 
     #[test]
-    fn missing_evidence_does_not_create_a_location_or_fingerprint() {
-        let mut file_only = issue("a", Severity::Low, "src/file.py");
+    fn all_severities_map_to_sarif_levels() {
+        for (severity, level) in [
+            (Severity::Critical, "error"),
+            (Severity::High, "error"),
+            (Severity::Medium, "warning"),
+            (Severity::Low, "note"),
+            (Severity::Info, "note"),
+        ] {
+            let log = render_issues(vec![sample_issue("rule", severity, "src/main.py")]);
+            assert_eq!(log["runs"][0]["results"][0]["level"], level);
+        }
+    }
+
+    #[test]
+    fn missing_location_and_fingerprint_are_not_fabricated() {
+        let mut file_only = sample_issue("a", Severity::Low, "src/file.py");
         file_only.start_line = 0;
         file_only.fingerprint.clear();
-        let run = render_run(vec![file_only, issue("b", Severity::Critical, "")]);
-        let result = &run["results"][0];
-        assert!(result.get("partialFingerprints").is_none());
+        let log = render_issues(vec![
+            file_only,
+            sample_issue("b", Severity::Critical, "../secret.py"),
+        ]);
+        let results = &log["runs"][0]["results"];
+        assert!(results[0].get("partialFingerprints").is_none());
         assert_eq!(
-            result["locations"][0]["physicalLocation"],
+            results[0]["locations"][0]["physicalLocation"],
             json!({ "artifactLocation": { "uri": "src/file.py" } })
         );
-        assert!(run["results"][1].get("locations").is_none());
+        assert!(results[1].get("locations").is_none());
+    }
+
+    #[test]
+    fn invocation_success_requires_a_completed_scan_even_with_no_findings() {
+        for status in [
+            ScanStatus::Queued,
+            ScanStatus::Running,
+            ScanStatus::Paused,
+            ScanStatus::Canceling,
+            ScanStatus::Canceled,
+            ScanStatus::Failed,
+            ScanStatus::Completed,
+        ] {
+            let mut scan = snapshot(Vec::new());
+            scan.run.status = status;
+            let text = render(&scan).unwrap();
+            assert_eq!(text, render(&scan).unwrap());
+            let log: Value = serde_json::from_str(&text).unwrap();
+            let run = &log["runs"][0];
+            assert_eq!(
+                run["invocations"][0]["executionSuccessful"],
+                status == ScanStatus::Completed
+            );
+            assert_eq!(run["tool"]["driver"]["rules"], json!([]));
+            assert_eq!(run["results"], json!([]));
+        }
+    }
+
+    #[test]
+    fn sarif_does_not_embed_source_evidence_or_scan_configuration() {
+        let mut issue = sample_issue("security.hardcoded_secret", Severity::High, "src/key.py");
+        issue.evidence = "password = 'private-value'".into();
+        let mut scan = snapshot(vec![issue]);
+        scan.run.config = json!({ "path": "C:/private/project", "token": "private-token" });
+        let text = render(&scan).unwrap();
+        assert!(!text.contains("private-value"));
+        assert!(!text.contains("private-token"));
+        assert!(!text.contains("C:/private"));
     }
 
     #[test]
