@@ -1,4 +1,6 @@
-use crate::domain::types::{Issue, PromptArtifact, PromptMode, ScanRun, ScanStatus, ScoreSnapshot};
+#[cfg(feature = "desktop")]
+use crate::domain::types::Issue;
+use crate::domain::types::{PromptArtifact, PromptMode, ScanRun, ScanStatus, ScoreSnapshot};
 use crate::error::AppError;
 use crate::history::compare_scans;
 use crate::prompt::{PromptProjectContext, generate_prompt};

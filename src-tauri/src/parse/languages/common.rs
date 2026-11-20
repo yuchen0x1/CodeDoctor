@@ -4,6 +4,7 @@
 #[derive(Debug, Clone)]
 pub struct LineIndex {
     starts: Vec<usize>,
+    len: usize,
 }
 
 impl LineIndex {
@@ -14,14 +15,16 @@ impl LineIndex {
                 starts.push(i + 1);
             }
         }
-        Self { starts }
+        Self {
+            starts,
+            len: text.len(),
+        }
     }
 
     /// Returns the 1-based (line, byte column) for a byte offset.
     /// Offsets beyond the buffer clamp to the last position.
     pub fn line_col(&self, byte: usize) -> (u32, u32) {
-        let last = *self.starts.last().unwrap_or(&0);
-        let byte = byte.min(last.max(0));
+        let byte = byte.min(self.len);
         let idx = self.starts.partition_point(|&s| s <= byte).max(1);
         let line = idx as u32;
         let col = (byte - self.starts[idx - 1]) as u32 + 1;
@@ -196,6 +199,24 @@ mod tests {
         assert_eq!(index.line_col(3), (2, 1));
         assert_eq!(index.line_col(5), (2, 3));
         assert_eq!(index.line_count(), 3);
+    }
+
+    #[test]
+    fn line_index_keeps_columns_on_a_final_line_without_newline() {
+        let index = LineIndex::new("ab\ncd");
+        assert_eq!(index.line_col(3), (2, 1));
+        assert_eq!(index.line_col(4), (2, 2));
+        assert_eq!(index.line_col(5), (2, 3));
+        // Past the end of the buffer clamps to the last position, not the line start.
+        assert_eq!(index.line_col(99), (2, 3));
+    }
+
+    #[test]
+    fn line_index_handles_single_line_utf8_and_empty_text() {
+        let index = LineIndex::new("中文abc");
+        assert_eq!(index.line_col(6), (1, 7));
+        assert_eq!(index.line_col(usize::MAX), (1, 10));
+        assert_eq!(LineIndex::new("").line_col(usize::MAX), (1, 1));
     }
 
     #[test]

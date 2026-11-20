@@ -63,6 +63,23 @@ jobs:
           name: windows-x64
           path: release-staging/
           if-no-files-found: error
+  msi:
+    name: Verify MSI installation and upgrade
+    needs: windows
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: windows-x64
+          path: release-staging
+      - run: ./scripts/validation/installer-smoke.ps1 -Folder release-staging -Installer msi
   linux:
     name: Package Linux x64 CLI
     needs: [verify, source]
@@ -94,7 +111,7 @@ jobs:
           if-no-files-found: error
   sign:
     name: Sign Windows update packages
-    needs: windows
+    needs: [windows, msi]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     environment: release-signing
     runs-on: ubuntu-24.04

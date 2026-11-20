@@ -99,13 +99,25 @@ export default function ArchitectureView({ projectId, runId }: Props) {
 
   const layout = useMemo(() => {
     const centerX = 470;
-    const centerY = 270;
-    const radius = Math.min(205, Math.max(95, 28 * Math.sqrt(filtered.nodes.length)));
+    const centerY = 300;
+    const radius = filtered.nodes.length === 1 ? 0 : 190;
     return filtered.nodes.map((node, index) => {
       const angle = filtered.nodes.length === 1
         ? -Math.PI / 2
         : (2 * Math.PI * index / filtered.nodes.length) - Math.PI / 2;
-      return { ...node, x: centerX + radius * Math.cos(angle), y: centerY + radius * Math.sin(angle) };
+      const x = centerX + radius * Math.cos(angle);
+      const y = centerY + radius * Math.sin(angle);
+      // 标签沿半径向外排布，避免固定放在节点下方时与相邻节点圆重叠或被画布裁切。
+      const offset = nodeRadius(node) + 16;
+      const cosine = Math.cos(angle);
+      return {
+        ...node,
+        x,
+        y,
+        labelX: x + cosine * offset,
+        labelY: y + Math.sin(angle) * offset + 4,
+        labelAnchor: (cosine > 0.25 ? "start" : cosine < -0.25 ? "end" : "middle") as "start" | "end" | "middle",
+      };
     });
   }, [filtered.nodes]);
   const positions = useMemo(() => new Map(layout.map((node) => [node.path, node])), [layout]);
@@ -141,7 +153,7 @@ export default function ArchitectureView({ projectId, runId }: Props) {
     {loading && <div className="architecture-view__empty" role="status">正在读取本地依赖快照…</div>}
 
     {graph && <>
-      <div className="architecture-view__filters">
+      <div className="architecture-view__filters" role="group" aria-label="架构关系筛选">
         <label>搜索文件
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="输入模块路径" />
         </label>
@@ -170,7 +182,7 @@ export default function ArchitectureView({ projectId, runId }: Props) {
             <span><i className="architecture-view__legend-line architecture-view__legend-line--cycle" />循环关系</span>
             {cloneCount > 0 && <span><i className="architecture-view__legend-line architecture-view__legend-line--clone" />重复代码</span>}
           </div>
-          {filtered.nodes.length ? <svg className="architecture-view__canvas" viewBox="0 0 940 540" role="img" aria-label="项目文件依赖关系图">
+          {filtered.nodes.length ? <svg className="architecture-view__canvas" viewBox="0 0 940 600" role="group" aria-label="项目文件依赖关系图">
             <defs>
               <marker id="architecture-view-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker>
             </defs>
@@ -189,10 +201,15 @@ export default function ArchitectureView({ projectId, runId }: Props) {
                 <title>{edge.sourcePath} {clone ? "↔" : "→"} {edge.targetPath} · {edge.kind} · {Math.round(edge.confidence * 100)}%</title>
               </line>;
             })}
-            {layout.map((node) => <g key={node.path} className={"architecture-view__node " + (selectedPath === node.path ? "architecture-view__node--selected" : "") + (cycleMembers.has(node.path) ? " architecture-view__node--cycle" : "")} role="button" tabIndex={0} aria-label={`${node.path}, 入度 ${node.fanIn}, 出度 ${node.fanOut}`} onClick={() => setSelectedPath(node.path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") setSelectedPath(node.path); }}>
+            {layout.map((node) => <g key={node.path} className={"architecture-view__node " + (selectedPath === node.path ? "architecture-view__node--selected" : "") + (cycleMembers.has(node.path) ? " architecture-view__node--cycle" : "")} role="button" tabIndex={0} aria-pressed={selectedPath === node.path} aria-label={`${node.path}, 入度 ${node.fanIn}, 出度 ${node.fanOut}`}
+              onClick={() => setSelectedPath(node.path)} onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                setSelectedPath(node.path);
+              }}>
               <title>{node.path} · 入度 {node.fanIn} · 出度 {node.fanOut}</title>
               <circle cx={node.x} cy={node.y} r={nodeRadius(node)} />
-              <text x={node.x} y={node.y + 29} textAnchor="middle">{shortPath(node.path).slice(-22)}</text>
+              <text x={node.labelX} y={node.labelY} textAnchor={node.labelAnchor}>{shortPath(node.path).slice(-22)}</text>
             </g>)}
           </svg> : <div className="architecture-view__empty"><h3>当前筛选没有匹配节点</h3><p>调整搜索、关系类型或循环关系筛选。</p></div>}
           <p className="architecture-view__caption">图中默认按连接数展示最相关节点；节点选择和下方文件列表仍可查看未显示节点。</p>
@@ -209,7 +226,7 @@ export default function ArchitectureView({ projectId, runId }: Props) {
             {clones.length > 0 && <><h4>重复代码</h4><EdgeList edges={clones} direction="↔" selectedPath={selectedPath} onSelect={setSelectedPath} /></>}
           </> : <p className="architecture-view__muted">选择图中的节点或文件列表。</p>}
           <h3 className="architecture-view__node-heading">文件节点</h3>
-          <div className="architecture-view__node-list">{(graph.nodes || []).map((node) => <button className={selectedPath === node.path ? "architecture-view__node-row architecture-view__node-row--selected" : "architecture-view__node-row"} key={node.path} onClick={() => setSelectedPath(node.path)}>
+          <div className="architecture-view__node-list">{(graph.nodes || []).map((node) => <button className={selectedPath === node.path ? "architecture-view__node-row architecture-view__node-row--selected" : "architecture-view__node-row"} key={node.path} type="button" aria-pressed={selectedPath === node.path} onClick={() => setSelectedPath(node.path)}>
             <span title={node.path}>{node.path}</span><small>{node.fanIn} 入 · {node.fanOut} 出</small>
           </button>)}</div>
         </aside>

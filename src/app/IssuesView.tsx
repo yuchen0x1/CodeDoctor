@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { Issue, Severity } from "../lib/contracts";
 import type { IssueSourceContext } from "../lib/sourceContext";
 import {
@@ -42,8 +42,10 @@ const severityLabels: Record<Severity, string> = {
 export default function IssuesView({ issues, projectRoot, onOpenLocation, loadCodeContext, onExport }: IssuesViewProps) {
   const [filters, setFilters] = useState<IssueViewFilters>(initialFilters);
   const [offset, setOffset] = useState(0);
+  const detailsPrefix = useId();
   const pageSize = 50;
   const visibleIssues = useMemo(() => filterAndSortIssues(issues, filters), [issues, filters]);
+  const pageOffset = Math.min(offset, Math.max(0, Math.ceil(visibleIssues.length / pageSize) - 1) * pageSize);
   const categories = useMemo(() => uniqueIssueValues(issues, (issue) => issue.category), [issues]);
   const languages = useMemo(() => uniqueIssueValues(issues, (issue) => languageForIssuePath(issue.filePath)), [issues]);
   const modules = useMemo(() => uniqueIssueValues(issues, (issue) => moduleForIssuePath(issue.filePath)), [issues]);
@@ -62,7 +64,7 @@ export default function IssuesView({ issues, projectRoot, onOpenLocation, loadCo
       {onExport && <button className="button button--quiet" type="button" disabled={!visibleIssues.length} onClick={() => void onExport(visibleIssues)}>导出当前筛选</button>}
     </div>
 
-    <div className="issues-view__filters" aria-label="问题筛选">
+    <div className="issues-view__filters" role="group" aria-label="问题筛选">
       <label className="issues-view__search">
         <span>搜索问题</span>
         <input value={filters.search} onChange={(event) => update("search", event.target.value)} placeholder="名称、规则、文件或证据" />
@@ -111,24 +113,26 @@ export default function IssuesView({ issues, projectRoot, onOpenLocation, loadCo
     </div>
 
     {visibleIssues.length ? <div className="issues-view__list">
-      {visibleIssues.slice(offset, offset + pageSize).map((issue) => <IssueItem
+      {visibleIssues.slice(pageOffset, pageOffset + pageSize).map((issue) => <IssueItem
         key={issue.id}
         issue={issue}
+        detailsId={`${detailsPrefix}-details-${encodeURIComponent(issue.id)}`}
         projectRoot={projectRoot}
         onOpenLocation={onOpenLocation}
         loadCodeContext={loadCodeContext}
       />)}
     </div> : <div className="issues-view__empty" role="status">{issues.length ? "没有符合当前筛选条件的问题。" : "当前扫描没有记录问题。"}</div>}
     {visibleIssues.length > pageSize && <div className="button-row">
-      <span className="muted">{offset + 1}–{Math.min(offset + pageSize, visibleIssues.length)} / {visibleIssues.length}</span>
-      <button className="button button--quiet" disabled={offset === 0} onClick={() => setOffset(offset - pageSize)}>上一页</button>
-      <button className="button button--quiet" disabled={offset + pageSize >= visibleIssues.length} onClick={() => setOffset(offset + pageSize)}>下一页</button>
+      <span className="muted" role="status">显示第 {pageOffset + 1}–{Math.min(pageOffset + pageSize, visibleIssues.length)} 项，共 {visibleIssues.length} 项</span>
+      <button className="button button--quiet" disabled={pageOffset === 0} onClick={() => setOffset(pageOffset - pageSize)}>上一页</button>
+      <button className="button button--quiet" disabled={pageOffset + pageSize >= visibleIssues.length} onClick={() => setOffset(pageOffset + pageSize)}>下一页</button>
     </div>}
   </section>;
 }
 
-function IssueItem({ issue, projectRoot, onOpenLocation, loadCodeContext }: {
+function IssueItem({ issue, detailsId, projectRoot, onOpenLocation, loadCodeContext }: {
   issue: Issue;
+  detailsId: string;
   projectRoot: string;
   onOpenLocation?: IssueLocationOpener;
   loadCodeContext?: IssueContextLoader;
@@ -139,24 +143,33 @@ function IssueItem({ issue, projectRoot, onOpenLocation, loadCodeContext }: {
   const [contextError, setContextError] = useState("");
   const [locationError, setLocationError] = useState("");
   const [contextRequested, setContextRequested] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const contextHeading = useRef<HTMLHeadingElement>(null);
+  const retryButton = useRef<HTMLButtonElement>(null);
 
-  const toggleExpanded = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (!next || contextRequested) return;
+  const requestContext = (fromRetry = false) => {
+    if (retrying) return;
     setContextRequested(true);
     if (!loadCodeContext) {
       setContextState("unavailable");
       return;
     }
-    setContextState("loading");
+    if (fromRetry) setRetrying(true);
+    else setContextState("loading");
     void loadCodeContext(issue, projectRoot).then((result) => {
+      if (fromRetry && document.activeElement === retryButton.current) contextHeading.current?.focus();
       setContext(result);
       setContextState(result ? "loaded" : "unavailable");
     }).catch((reason: unknown) => {
       setContextError(reason instanceof Error ? reason.message : String(reason));
       setContextState("error");
-    });
+    }).finally(() => { if (fromRetry) setRetrying(false); });
+  };
+
+  const toggleExpanded = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (next && !contextRequested) requestContext();
   };
 
   const openLocation = async () => {
@@ -169,14 +182,14 @@ function IssueItem({ issue, projectRoot, onOpenLocation, loadCodeContext }: {
   return <article className={"issues-view__item " + (expanded ? "issues-view__item--expanded" : "")}>
     <div className="issues-view__item-head">
       <span className={"severity severity--" + issue.severity}>{severityLabels[issue.severity]}</span>
-      <button className="issues-view__summary" type="button" aria-expanded={expanded} onClick={toggleExpanded}>
+      <button className="issues-view__summary" type="button" aria-expanded={expanded} aria-controls={detailsId} onClick={toggleExpanded}>
         <strong>{issue.title}</strong>
         <span>{issue.filePath}:{issue.startLine}:{issue.startColumn} · {issue.ruleId}</span>
       </button>
       <span className="issues-view__confidence">{issue.coverage} · {Math.round(issue.confidence * 100)}%</span>
     </div>
 
-    {expanded && <div className="issues-view__details">
+    <div id={detailsId} className={expanded ? "issues-view__details" : undefined} hidden={!expanded}>{expanded && <>
       <dl>
         <div><dt>问题说明</dt><dd>{issue.explanation}</dd></div>
         <div><dt>潜在影响</dt><dd>{issue.impact}</dd></div>
@@ -187,13 +200,16 @@ function IssueItem({ issue, projectRoot, onOpenLocation, loadCodeContext }: {
       </dl>
 
       <section className="issues-view__context" aria-label="代码上下文">
-        <h3>代码上下文</h3>
+        <h3 ref={contextHeading} tabIndex={-1}>代码上下文</h3>
         {contextState === "idle" && <p>展开问题后读取上下文状态。</p>}
         {contextState === "loading" && <p role="status">正在读取本地代码上下文…</p>}
         {contextState === "unavailable" && <p>该问题暂无可读取的源码上下文。</p>}
-        {contextState === "error" && <p role="alert">无法读取源码上下文：{contextError}</p>}
+        {contextState === "error" && <>
+          <p role="alert">无法读取源码上下文：{contextError}</p>
+          <button ref={retryButton} className="button button--quiet" type="button" aria-disabled={retrying} onClick={() => requestContext(true)}>{retrying ? "正在重试…" : "重试读取上下文"}</button>
+        </>}
         {context?.stale && <p role="status">源码已变化。重新扫描后可查看对应代码。</p>}
-        {context && !context.stale && <pre className="issues-view__code"><code>{context.text.split(/\r?\n/).map((line, index) => {
+        {context && !context.stale && <pre className="issues-view__code" tabIndex={0} role="group" aria-label="源码片段"><code>{context.text.split(/\r?\n/).map((line, index) => {
           const lineNumber = context.startLine + index;
           const matched = lineNumber >= issue.startLine && lineNumber <= issue.endLine;
           return <span className={matched ? "code-line code-line--matched" : "code-line"} key={lineNumber}>{lineNumber}: {line}</span>;
@@ -202,6 +218,6 @@ function IssueItem({ issue, projectRoot, onOpenLocation, loadCodeContext }: {
       </section>
 
       {onOpenLocation && context?.canOpenNatively && <div className="issues-view__actions"><button className="button button--quiet" type="button" onClick={() => void openLocation()}>用记事本打开源文件</button>{locationError && <p role="alert">无法打开源文件：{locationError}</p>}</div>}
-    </div>}
+    </>}</div>
   </article>;
 }

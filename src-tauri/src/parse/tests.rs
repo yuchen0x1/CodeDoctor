@@ -91,6 +91,23 @@ fn javascript_import_arrow_and_dynamic_import_are_distinct() {
 }
 
 #[test]
+fn final_line_ranges_keep_their_columns_without_a_trailing_newline() {
+    let text = "def example():\n    return helper()";
+    let parsed = ParserRegistry::parse(&file("Python", "final.py"), text);
+    let function = &parsed.functions[0];
+    assert_eq!(function.range.end_line, 2);
+    assert_eq!(function.range.end_column, 20);
+    let call = parsed
+        .calls
+        .iter()
+        .find(|call| call.callee == "helper")
+        .unwrap();
+    assert_eq!(call.range.start_line, 2);
+    assert_eq!(call.range.start_column, 12);
+    assert_eq!(call.range.end_column, 20);
+}
+
+#[test]
 fn malformed_source_keeps_diagnostics_and_marks_partial_coverage() {
     let parsed =
         ParserRegistry::parse(&file("Python", "broken.py"), "def broken(:\n    return 1\n");

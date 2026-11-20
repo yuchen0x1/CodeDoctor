@@ -41,6 +41,53 @@ const filters = (overrides: Partial<IssueViewFilters> = {}): IssueViewFilters =>
   ...overrides,
 });
 
+const backendLanguageMappings = [
+  ["src/main.py", "Python"],
+  ["src/main.pyw", "Python"],
+  ["src/main.pyi", "Python"],
+  ["src/main.js", "JavaScript"],
+  ["src/main.mjs", "JavaScript"],
+  ["src/main.cjs", "JavaScript"],
+  ["src/main.ts", "TypeScript"],
+  ["src/main.mts", "TypeScript"],
+  ["src/main.cts", "TypeScript"],
+  ["src/main.CTS", "TypeScript"],
+  ["src/main.PYW", "Python"],
+  ["src/main.PYI", "Python"],
+  // The UI intentionally groups JSX/TSX with JavaScript/TypeScript.
+  ["src/view.jsx", "JavaScript"],
+  ["src/view.tsx", "TypeScript"],
+  ["src/main.java", "Java"],
+  ["src/main.c", "C"],
+  ["src/main.h", "C/C++"],
+  ["src/main.cc", "C++"],
+  ["src/main.cpp", "C++"],
+  ["src/main.cxx", "C++"],
+  ["src/main.hpp", "C++"],
+  ["src/main.cs", "C#"],
+  ["src/main.go", "Go"],
+  ["src/main.rs", "Rust"],
+  ["src/main.php", "PHP"],
+  ["src/main.kt", "Kotlin"],
+  ["src/main.kts", "Kotlin"],
+  ["src/main.swift", "Swift"],
+  ["src/main.html", "HTML"],
+  ["src/main.htm", "HTML"],
+  ["src/main.css", "CSS"],
+  ["src/main.scss", "SCSS"],
+  ["src/main.vue", "Vue"],
+  ["src/main.svelte", "Svelte"],
+  ["src/main.sql", "SQL"],
+  ["src/main.sh", "Shell"],
+  ["src/main.bash", "Shell"],
+  ["src/main.ps1", "PowerShell"],
+  ["src/main.json", "JSON"],
+  ["src/main.yaml", "YAML"],
+  ["src/main.yml", "YAML"],
+  ["src/main.xml", "XML"],
+  ["src/Dockerfile", "Dockerfile"],
+] as const;
+
 describe("issue view model", () => {
   const issues = [
     issue({ id: "2", filePath: "src/features/editor.ts", startLine: 40 }),
@@ -59,6 +106,28 @@ describe("issue view model", () => {
     }));
 
     expect(result.map((item) => item.id)).toEqual(["2"]);
+  });
+
+  it.each(backendLanguageMappings)("classifies backend language path %s as %s", (filePath, expectedLanguage) => {
+    expect(languageForIssuePath(filePath)).toBe(expectedLanguage);
+  });
+
+  it("keeps backend-supported paths in the language-filtered export candidates", () => {
+    const candidates = backendLanguageMappings.map(([filePath], index) => issue({
+      id: `language-candidate-${index}`,
+      filePath,
+    }));
+    const languages = new Set(backendLanguageMappings.map(([, language]) => language));
+
+    for (const language of languages) {
+      const expectedPaths = backendLanguageMappings
+        .filter(([, mappedLanguage]) => mappedLanguage === language)
+        .map(([filePath]) => filePath)
+        .sort();
+      const exportCandidates = filterAndSortIssues(candidates, filters({ language }));
+
+      expect(exportCandidates.map(({ filePath }) => filePath).sort()).toEqual(expectedPaths);
+    }
   });
 
   it("sorts by severity, path, and source line with deterministic ties", () => {

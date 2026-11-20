@@ -25,6 +25,13 @@ fn cache_key_changes_when_file_or_configuration_changes() {
 }
 
 #[test]
+fn corrected_source_positions_do_not_reuse_legacy_rule_cache() {
+    let legacy = rule_cache_key("project", "main.py", "hash-a", "rules-2", "{}");
+    let current = rule_cache_key("project", "main.py", "hash-a", RULE_VERSION, "{}");
+    assert_ne!(legacy, current);
+}
+
+#[test]
 fn pause_gate_blocks_until_resume_and_cancel_flag_is_observable() {
     let gate = Arc::new(PauseGate::default());
     gate.pause();

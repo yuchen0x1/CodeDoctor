@@ -67,6 +67,13 @@ const safeError = (reason: unknown) => {
   }
   return String(reason);
 };
+type FindingsState = "idle" | "loading" | "error" | "ready";
+const findingsStatus = {
+  idle: "扫描完成后显示",
+  loading: "正在加载问题清单…",
+  error: "问题清单暂不可用。",
+};
+const emptyIssues: Issue[] = [];
 const scanActive = (status?: string) => status === "running" || status === "queued" || status === "paused" || status === "canceling";
 const scanStatusLabels: Record<ScanRun["status"], string> = {
   queued: "已排队", running: "扫描中", paused: "已暂停", canceling: "正在取消", canceled: "已取消", completed: "已完成", failed: "失败",
@@ -106,8 +113,14 @@ export default function App() {
   const [settings, setSettings] = useState(readSettings);
   const [run, setRun] = useState<ScanRunSummary | null>(null);
   const [event, setEvent] = useState<ScanEvent | null>(null);
-  const [issues, setIssues] = useState<Issue[]>([]);
+  const [loadedIssues, setIssues] = useState<Issue[] | null>(null);
   const [score, setScore] = useState<ScoreSnapshot | null>(null);
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const [issuesError, setIssuesError] = useState("");
+  const [scoreError, setScoreError] = useState("");
+  const [issuesLoadVersion, setIssuesLoadVersion] = useState(0);
+  const [scoreLoadVersion, setScoreLoadVersion] = useState(0);
   const [analyzerRuns, setAnalyzerRuns] = useState<AnalyzerRun[]>([]);
   const [prompt, setPrompt] = useState<PromptArtifact | null>(null);
   const [promptMode, setPromptMode] = useState<PromptMode>("comprehensive");
@@ -116,9 +129,11 @@ export default function App() {
   const [historyRuns, setHistoryRuns] = useState<ScanRun[]>([]);
   const [historyDiff, setHistoryDiff] = useState<HistoryDiff | null>(null);
   const [historyIssueDetails, setHistoryIssueDetails] = useState<Record<string, Issue>>({});
-  const [baseRunId, setBaseRunId] = useState("");
-  const [targetRunId, setTargetRunId] = useState("");
-  const [reportRunId, setReportRunId] = useState("");
+  const [historySelection, setHistorySelection] = useState({ baseRunId: "", targetRunId: "", reportRunId: "" });
+  const { baseRunId, targetRunId, reportRunId } = historySelection;
+  const setBaseRunId = (value: string) => setHistorySelection((selected) => ({ ...selected, baseRunId: value }));
+  const setTargetRunId = (value: string) => setHistorySelection((selected) => ({ ...selected, targetRunId: value }));
+  const setReportRunId = (value: string) => setHistorySelection((selected) => ({ ...selected, reportRunId: value }));
   const [path, setPath] = useState("");
   const [reportFormat, setReportFormat] = useState<ReportFormat>("markdown");
   const [reportDestination, setReportDestination] = useState("");
@@ -127,10 +142,20 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [core, setCore] = useState("checking");
   const activeRun = useRef("");
+  const activeProject = useRef("");
+  const projectRequest = useRef(0);
+  const explicitProjectChoice = useRef(false);
+  const historyRequest = useRef(0);
+  const pageHeading = useRef<HTMLHeadingElement>(null);
   const projectId = project?.projectId;
   const runId = run?.run.id;
   const runStatus = run?.run.status;
   const taskRunning = scanActive(runStatus);
+  const issues = loadedIssues ?? emptyIssues;
+  const findingsState: FindingsState = runStatus !== "completed" ? "idle" : loadedIssues !== null ? "ready"
+    : issuesLoading || !issuesError ? "loading" : "error";
+  const canRetryIssues = Boolean(issuesError) && !issuesLoading;
+  const canRetryScore = Boolean(scoreError) && !scoreLoading;
   useEffect(() => { health().then((value) => setCore(value === "ok" ? "ok" : "error")).catch(() => setCore("error")); }, []);
   useEffect(() => { document.documentElement.dataset.theme = settings.theme; }, [settings.theme]);
 
@@ -140,8 +165,10 @@ export default function App() {
     if (next && activeRun.current === next.run.id) return;
     activeRun.current = next?.run.id ?? "";
     setEvent(null);
-    setIssues([]);
+    setIssues(null);
     setScore(null);
+    setIssuesError(""); setScoreError("");
+    setIssuesLoading(false); setScoreLoading(false);
     setAnalyzerRuns([]);
     setPrompt(null);
     setPromptBaseRunId("");
@@ -151,7 +178,9 @@ export default function App() {
   const showProject = (next: ProjectSummary) => {
     setProject(next);
     setPath(next.canonicalPath);
-    if (next.projectId === projectId) return;
+    if (next.projectId === activeProject.current) return;
+    activeProject.current = next.projectId;
+    historyRequest.current += 1;
     showRun(null);
     setHistoryRuns([]);
     setHistoryDiff(null);
@@ -159,28 +188,35 @@ export default function App() {
     setBaseRunId(""); setTargetRunId(""); setReportRunId(""); setReportDestination("");
   };
 
-  const restoreSavedProject = async (projectId: string) => {
+  const restoreSavedProject = async (projectId: string, automatic = false) => {
+    if (!automatic) explicitProjectChoice.current = true;
+    const request = ++projectRequest.current;
+    const current = () => projectRequest.current === request;
     setBusy(true); setError(""); setNotice("");
     try {
       const nextProject = await restoreProject(projectId);
+      if (!current()) return;
       showProject(nextProject);
       const runs = await listScanRuns(projectId);
+      if (!current()) return;
       setHistoryRuns(runs);
       const latestCompleted = runs.find(completed);
-      if (latestCompleted) showRun(await getScan(latestCompleted.id));
+      const nextRun = latestCompleted ? await getScan(latestCompleted.id) : null;
+      if (!current()) return;
+      showRun(nextRun);
       setPage("overview");
-    } catch (reason) { setError(safeError(reason)); }
-    finally { setBusy(false); }
+    } catch (reason) { if (current()) setError(safeError(reason)); }
+    finally { if (current()) setBusy(false); }
   };
 
   useEffect(() => {
     let active = true;
     void listProjects().then(async (items) => {
       if (!active) return;
-      setSavedProjects(items);
-      if (items.length) await restoreSavedProject(items[0].id);
-    }).catch((reason) => { if (active) setError(safeError(reason)); });
-    return () => { active = false; };
+      if (!explicitProjectChoice.current || !activeProject.current) setSavedProjects(items);
+      if (!explicitProjectChoice.current && items.length) await restoreSavedProject(items[0].id, true);
+    }).catch((reason) => { if (active && !explicitProjectChoice.current) setError(safeError(reason)); });
+    return () => { active = false; projectRequest.current += 1; };
   }, []);
 
   useEffect(() => {
@@ -223,13 +259,41 @@ export default function App() {
   useEffect(() => {
     if (!runId || runStatus !== "completed") return;
     let live = true;
-    void Promise.all([allIssuesForRun(runId), calculateReport(runId)]).then(([findings, report]) => {
-      if (!live || activeRun.current !== runId) return;
-      setIssues(findings);
-      setScore(report.score);
-    }).catch((reason) => { if (live) setError(safeError(reason)); });
+    const current = () => live && activeRun.current === runId;
+    setIssuesLoading(true);
+    setIssuesError("");
+    void allIssuesForRun(runId).then((findings) => {
+      if (current()) setIssues(findings);
+    }).catch((reason) => { if (current()) setIssuesError(safeError(reason)); })
+      .finally(() => { if (current()) setIssuesLoading(false); });
     return () => { live = false; };
-  }, [runId, runStatus]);
+  }, [runId, runStatus, issuesLoadVersion]);
+
+  useEffect(() => {
+    if (!runId || runStatus !== "completed") return;
+    let live = true;
+    const current = () => live && activeRun.current === runId;
+    setScoreLoading(true);
+    setScoreError("");
+    void calculateReport(runId).then((report) => {
+      if (current()) setScore(report.score);
+    }).catch((reason) => { if (current()) setScoreError(safeError(reason)); })
+      .finally(() => { if (current()) setScoreLoading(false); });
+    return () => { live = false; };
+  }, [runId, runStatus, scoreLoadVersion]);
+
+  const retryResults = (button: HTMLButtonElement) => {
+    if (!canRetryIssues && !canRetryScore) return;
+    if (document.activeElement === button) pageHeading.current?.focus();
+    if (canRetryIssues) {
+      setIssuesLoading(true);
+      setIssuesLoadVersion(issuesLoadVersion + 1);
+    }
+    if (canRetryScore) {
+      setScoreLoading(true);
+      setScoreLoadVersion(scoreLoadVersion + 1);
+    }
+  };
 
   useEffect(() => {
     if (!runId || taskRunning) return;
@@ -247,22 +311,37 @@ export default function App() {
       if (!live) return;
       setHistoryRuns(runs);
       const snapshots = runs.filter(completed);
-      setBaseRunId(snapshots[1]?.id ?? "");
-      setTargetRunId(snapshots[0]?.id ?? "");
-      setReportRunId(snapshots[0]?.id ?? "");
+      const valid = (id: string) => snapshots.some((item) => item.id === id);
+      setHistorySelection((selected) => {
+        let base = valid(selected.baseRunId) ? selected.baseRunId : "";
+        let target = valid(selected.targetRunId) ? selected.targetRunId : "";
+        if (!target) target = snapshots.find((item) => item.id !== base)?.id ?? snapshots[0]?.id ?? "";
+        if (!base || base === target) base = snapshots.find((item) => item.id !== target)?.id ?? "";
+        return {
+          baseRunId: base,
+          targetRunId: target,
+          reportRunId: valid(selected.reportRunId) ? selected.reportRunId : snapshots[0]?.id ?? "",
+        };
+      });
     }).catch((reason) => { if (live) setError(safeError(reason)); });
     return () => { live = false; };
   }, [projectId, runStatus, score?.id]);
 
   const importIt = async (value: string) => {
     if (!value.trim() || busy || taskRunning) return;
+    explicitProjectChoice.current = true;
+    const request = ++projectRequest.current;
+    const current = () => projectRequest.current === request;
     setBusy(true); setError(""); setNotice("");
     try {
       const next = await importProject(value.trim());
-      setSavedProjects(await listProjects());
+      if (!current()) return;
       showProject(next);
       setPage("inspection");
-    } catch (reason) { setError(safeError(reason)); } finally { setBusy(false); }
+      const items = await listProjects();
+      if (current()) setSavedProjects(items);
+    } catch (reason) { if (current()) setError(safeError(reason)); }
+    finally { if (current()) setBusy(false); }
   };
 
   const scanIt = async (retry?: ScanRun) => {
@@ -349,6 +428,8 @@ export default function App() {
 
   const compareHistory = async () => {
     if (!baseRunId || !targetRunId || baseRunId === targetRunId) { setError("请选择两个不同的扫描快照。"); return; }
+    const request = ++historyRequest.current;
+    setHistoryDiff(null); setHistoryIssueDetails({});
     setBusy(true); setError("");
     try {
       const [diff, baseIssues, targetIssues] = await Promise.all([
@@ -356,14 +437,16 @@ export default function App() {
         allIssuesForRun(baseRunId),
         allIssuesForRun(targetRunId),
       ]);
+      if (historyRequest.current !== request) return;
       setHistoryDiff(diff);
       setHistoryIssueDetails(Object.fromEntries([...baseIssues, ...targetIssues].map((issue) => [issue.id, issue])));
     }
-    catch (reason) { setError(safeError(reason)); }
+    catch (reason) { if (historyRequest.current === request) setError(safeError(reason)); }
     finally { setBusy(false); }
   };
 
   const importSelectedPath = async (selectPath: () => Promise<string | null>) => {
+    explicitProjectChoice.current = true;
     try {
       const selectedPath = await selectPath();
       if (selectedPath) {
@@ -402,6 +485,11 @@ export default function App() {
 
   const title = (nav.find((item) => item.id === page) || nav[0]).label;
   const status = runStatus ?? "queued";
+  const announcementStatus = event?.status === "completed" || event?.status === "failed" || event?.status === "canceled"
+    ? event.status : runStatus;
+  const announcementPhase = announcementStatus === "running" ? stageNames[event?.stage ?? ""] : undefined;
+  const scanAnnouncement = announcementStatus
+    ? `扫描状态：${scanStatusLabels[announcementStatus]}${announcementPhase ? ` · ${announcementPhase}` : ""}` : "";
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -411,24 +499,31 @@ export default function App() {
       <div className="sidebar__footer">● 离线运行 · 只读分析<br />不会上传源代码</div>
     </aside>
     <main className="main">
-      <header className="topbar"><div><p className="eyebrow">CODE QUALITY / {page.toUpperCase()}</p><h1>{title}</h1><p className="topbar__subtitle">{project ? project.displayName + " · " + displayPath(project.canonicalPath) : "把不确定的代码项目，变成可验证的治理清单"}</p></div><span className="badge">OFFLINE</span></header>
+      <header className="topbar"><div><p className="eyebrow">CODE QUALITY / {page.toUpperCase()}</p><h1 ref={pageHeading} tabIndex={-1}>{title}</h1><p className="topbar__subtitle">{project ? project.displayName + " · " + displayPath(project.canonicalPath) : "把不确定的代码项目，变成可验证的治理清单"}</p></div><span className="badge">OFFLINE</span></header>
+      <div className="visually-hidden" role="status">{scanAnnouncement}</div>
       {error && <div className="alert alert--error" role="alert">{error}<button onClick={() => setError("")}>关闭</button></div>}
       {notice && <div className="alert alert--success" role="status">{notice}<button onClick={() => setNotice("")}>关闭</button></div>}
-      {page === "overview" && <Overview project={project} savedProjects={savedProjects} runs={historyRuns} issues={issues} score={score} busy={busy || taskRunning} onImport={() => setPage("inspection")} onIssues={() => setPage("issues")} onRestore={restoreSavedProject} onViewRun={openHistoryRun} />}
+      {runStatus === "completed" && (issuesError || scoreError) && <div className="alert alert--error" role="alert">
+        <div>{issuesError && <p>问题清单加载失败：{issuesError}</p>}{scoreError && <p>评分加载失败：{scoreError}{findingsState === "ready" && "，已读取的问题仍可查看。"}</p>}</div>
+        <button disabled={!canRetryIssues && !canRetryScore} onClick={(event) => retryResults(event.currentTarget)}>重新加载结果</button>
+      </div>}
+      {page === "overview" && <Overview project={project} savedProjects={savedProjects} runs={historyRuns} issues={issues} findingsState={findingsState} score={score} busy={busy || taskRunning} onImport={() => setPage("inspection")} onIssues={() => setPage("issues")} onRestore={restoreSavedProject} onViewRun={openHistoryRun} />}
       {page === "inspection" && <Inspection project={project} path={path} setPath={setPath} busy={busy || taskRunning} onImport={importIt} onPickDirectory={() => importSelectedPath(pickProjectDirectory)} onPickArchive={() => importSelectedPath(pickProjectArchive)} onScan={() => void scanIt()} />}
       {page === "scans" && <Scans run={run} event={event} status={status} analyzers={analyzerRuns} canRetry={project?.sourceAvailable === true} onPause={() => void controlScan(pauseScan)} onResume={() => void controlScan(resumeScan)} onCancel={() => void controlScan(cancelScan)} onIssues={() => setPage("issues")} onRetry={() => void scanIt(run?.run)} />}
-      {page === "issues" && <div className="page-stack"><IssuesView key={runId} issues={issues} projectRoot={project?.canonicalPath || ""} loadCodeContext={runId ? (issue) => readIssueSource(runId, issue.id) : undefined}
-        onOpenLocation={runId ? (issue) => openIssueSource(runId, issue.id) : undefined} onExport={runStatus === "completed" ? saveIssues : undefined} /></div>}
+      {page === "issues" && <div className="page-stack">
+        {(findingsState === "idle" || findingsState === "loading") && <p className="muted" role="status">{findingsStatus[findingsState]}</p>}
+        {findingsState === "ready" && <IssuesView key={runId} issues={issues} projectRoot={project?.canonicalPath || ""} loadCodeContext={runId ? (issue) => readIssueSource(runId, issue.id) : undefined}
+        onOpenLocation={runId ? (issue) => openIssueSource(runId, issue.id) : undefined} onExport={runStatus === "completed" ? saveIssues : undefined} />}</div>}
       {page === "architecture" && <div className="page-stack"><ArchitectureView projectId={project?.projectId || ""} runId={run?.run.status === "completed" ? run.run.id : null} /></div>}
-      {page === "comments" && <Category title="注释治理" text="保留公共 API、版权和复杂算法说明；疑似过时内容需要人工确认。" issues={issues.filter((issue) => issue.category === "comments")} />}
-      {page === "duplicates" && <Category title="重复代码" text="归一化 token 后比较结构片段，结果带有相似度和来源证据。" issues={issues.filter((issue) => issue.category === "duplicate")} />}
-      {page === "prompts" && <Prompts key={runId} run={run} issues={issues} prompt={prompt} mode={promptMode} setMode={(value) => { setPromptMode(value); setPrompt(null); }}
+      {page === "comments" && <Category title="注释治理" text="保留公共 API、版权和复杂算法说明；疑似过时内容需要人工确认。" issues={issues.filter((issue) => issue.category === "comments")} findingsState={findingsState} />}
+      {page === "duplicates" && <Category title="重复代码" text="归一化 token 后比较结构片段，结果带有相似度和来源证据。" issues={issues.filter((issue) => issue.category === "duplicate")} findingsState={findingsState} />}
+      {page === "prompts" && <Prompts key={runId} run={run} issues={issues} findingsState={findingsState} prompt={prompt} mode={promptMode} setMode={(value) => { setPromptMode(value); setPrompt(null); }}
         baseline={promptBaseRunId} baselines={historyRuns.filter((item) => completed(item) && item.id !== runId)} setBaseline={(value) => { setPromptBaseRunId(value); setPrompt(null); }}
         selectedIssueIds={selectedIssueIds} setSelectedIssueIds={(value) => { setSelectedIssueIds(value); setPrompt(null); }} busy={busy} onGenerate={generatePrompt}
         onCopy={copyPrompt} onExport={savePrompt} />}
       {page === "history" && <History project={project} runs={historyRuns} baseRunId={baseRunId} targetRunId={targetRunId} reportRunId={reportRunId}
-        setBaseRunId={(value) => { setBaseRunId(value); setHistoryDiff(null); }} setTargetRunId={(value) => { setTargetRunId(value); setHistoryDiff(null); }}
-        setReportRunId={setReportRunId} diff={historyDiff} issueDetails={historyIssueDetails} busy={busy} onCompare={compareHistory} format={reportFormat}
+        setBaseRunId={(value) => { historyRequest.current += 1; setBaseRunId(value); setHistoryDiff(null); }} setTargetRunId={(value) => { historyRequest.current += 1; setTargetRunId(value); setHistoryDiff(null); }}
+        setReportRunId={setReportRunId} diff={historyDiff?.baseRunId === baseRunId && historyDiff.targetRunId === targetRunId ? historyDiff : null} issueDetails={historyIssueDetails} busy={busy} onCompare={compareHistory} format={reportFormat}
         setFormat={(value) => { setReportFormat(value); setReportDestination(""); }} destination={reportDestination} setDestination={setReportDestination} onChooseDestination={chooseReportPath} onExport={exportCurrentReport} />}
       {page === "settings" && <SettingsView settings={settings} onSave={(next: AppSettings) => {
         writeSettings(next);
@@ -440,9 +535,9 @@ export default function App() {
   </div>;
 }
 
-function Overview({ project, savedProjects, runs, issues, score, busy, onImport, onIssues, onRestore, onViewRun }: {
+function Overview({ project, savedProjects, runs, issues, findingsState, score, busy, onImport, onIssues, onRestore, onViewRun }: {
   project: ProjectSummary | null; savedProjects: ProjectRecord[]; runs: ScanRun[]; issues: Issue[];
-  score: ScoreSnapshot | null; busy: boolean; onImport: () => void; onIssues: () => void; onRestore: (id: string) => void;
+  findingsState: FindingsState; score: ScoreSnapshot | null; busy: boolean; onImport: () => void; onIssues: () => void; onRestore: (id: string) => void;
   onViewRun: (id: string) => void;
 }) {
   const snapshots = runs.filter(completed);
@@ -462,7 +557,9 @@ function Overview({ project, savedProjects, runs, issues, score, busy, onImport,
       <Stat label="项目健康度" value={score?.confidence ? score.overallScore.toFixed(1) : "—"} hint={score ? grade + " · 覆盖 " + Math.round(score.coverage * 100) + "% · 可信度 " + Math.round(score.confidence * 100) + "%" : "完成扫描后计算"} />
       <Stat label="累计扫描文件" value={number(totals.files)} hint={snapshots.length + " 次已完成扫描"} />
       <Stat label="累计发现问题" value={number(totals.issues)} hint="当前项目的全部扫描记录" />
-      <Stat label="当前严重 / 高危" value={issues.filter((issue) => issue.severity === "critical").length + " / " + issues.filter((issue) => issue.severity === "high").length} hint="当前扫描快照" />
+      <Stat label="当前严重 / 高危" value={findingsState === "ready"
+        ? issues.filter((issue) => issue.severity === "critical").length + " / " + issues.filter((issue) => issue.severity === "high").length
+        : "—"} hint={findingsState === "ready" ? "当前扫描快照" : findingsStatus[findingsState]} />
     </section>
     <div className="two-col">
       <section className="panel">
@@ -475,11 +572,11 @@ function Overview({ project, savedProjects, runs, issues, score, busy, onImport,
         )}</ul> : <p className="muted">暂无扫描记录</p>}
       </section>
       <section className="panel">
-        <div className="section-heading"><h3>当前问题分布</h3>{issues.length > 0 && <button className="text-button" onClick={onIssues}>查看全部</button>}</div>
-        {score ? <div className="bars">{buckets.map(([value, label]) => {
+        <div className="section-heading"><h3>当前问题分布</h3>{findingsState === "ready" && issues.length > 0 && <button className="text-button" onClick={onIssues}>查看全部</button>}</div>
+        {findingsState === "ready" ? <div className="bars">{buckets.map(([value, label]) => {
           const count = issues.filter((issue) => issue.severity === value).length;
           return <div className="bar-row" key={value}><span>{label}</span><div><i style={{ width: (issues.length ? count / issues.length * 100 : 0) + "%" }} /></div><b>{count}</b></div>;
-        })}</div> : <p className="muted">扫描完成后显示</p>}
+        })}</div> : <p className="muted" role="status">{findingsStatus[findingsState]}</p>}
       </section>
     </div>
     {score && <QualityDetails score={score} />}
@@ -609,14 +706,19 @@ function Scans({ run, event, status, analyzers, canRetry, onPause, onResume, onC
   </div>;
 }
 
-function Category({ title, text, issues }: { title: string; text: string; issues: Issue[] }) {
-  return <div className="page-stack"><section className="panel panel--large"><p className="eyebrow">GOVERNANCE VIEW</p><h2>{title}</h2><p className="muted">{text}</p>{issues.length ? <div className="issue-table">{issues.map((issue) => <article className="issue-row" key={issue.id}><span className={"severity severity--" + issue.severity}>{issue.severity}</span><div className="issue-row__main"><strong>{issue.title}</strong><p>{issue.filePath}:{issue.startLine}</p><small>{issue.evidence}</small></div></article>)}</div> : <Empty title="暂无结果" text="完成扫描后，这个治理视图会展示真实证据。" />}</section></div>;
+function Category({ title, text, issues, findingsState }: { title: string; text: string; issues: Issue[]; findingsState: FindingsState }) {
+  return <div className="page-stack"><section className="panel panel--large"><p className="eyebrow">GOVERNANCE VIEW</p><h2>{title}</h2><p className="muted">{text}</p>
+    {findingsState === "loading" || findingsState === "error" ? <p className="muted" role="status">{findingsStatus[findingsState]}</p>
+      : issues.length ? <div className="issue-table">{issues.map((issue) => <article className="issue-row" key={issue.id}><span className={"severity severity--" + issue.severity}>{issue.severity}</span><div className="issue-row__main"><strong>{issue.title}</strong><p>{issue.filePath}:{issue.startLine}</p><small>{issue.evidence}</small></div></article>)}</div>
+      : <Empty title="暂无结果" text={findingsState === "ready" ? "当前扫描没有记录此类问题。" : "完成扫描后，这个治理视图会展示真实证据。"} />}
+  </section></div>;
 }
 
-function Prompts({ run, issues, prompt, mode, setMode, baseline, baselines, setBaseline,
+function Prompts({ run, issues, findingsState, prompt, mode, setMode, baseline, baselines, setBaseline,
   selectedIssueIds, setSelectedIssueIds, busy, onGenerate, onCopy, onExport }: {
   run: ScanRunSummary | null;
   issues: Issue[];
+  findingsState: FindingsState;
   prompt: PromptArtifact | null;
   mode: PromptMode;
   setMode: (value: PromptMode) => void;
@@ -646,7 +748,8 @@ function Prompts({ run, issues, prompt, mode, setMode, baseline, baselines, setB
         {baselines.map((item) => <option key={item.id} value={item.id}>增量 · {scanLabel(item)}</option>)}
       </select></label>
     </div>
-    {mode === "targeted" && <section className="prompt-target">
+    {mode === "targeted" && findingsState !== "ready" && <p className="muted" role="status">{findingsStatus[findingsState]}</p>}
+    {mode === "targeted" && findingsState === "ready" && <section className="prompt-target">
       <label>筛选待选问题<input value={query} onChange={(event) => { setQuery(event.target.value); setOffset(0); }} placeholder="按文件、规则或名称筛选" /></label>
       <div className="prompt-selection">{matches.slice(offset, offset + pageSize).map((issue) => <label key={issue.id}>
         <input type="checkbox" disabled={busy} checked={selection.has(issue.id)} onChange={(event) => {
