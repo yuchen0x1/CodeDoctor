@@ -297,23 +297,32 @@ fn multiline_credential_start(
     if !credential_line {
         return None;
     }
-    // Type annotations may contain separators before the initializer. Keep YAML
-    // block values ahead of any equals signs in their trailing comments.
-    line.match_indices(['=', ':']).find_map(|(assignment, _)| {
+    let key_indent = leading_indent(line);
+    let start_after =
+        |assignment: usize, prefix_len: usize, raw_value: &str, allow_pending: bool| {
+            let leading = raw_value.len() - raw_value.trim_start().len();
+            let value = raw_value.trim_start();
+            if value.is_empty() && allow_pending {
+                return Some(MultilineCredential::Pending { key_indent });
+            }
+            let value_start = line_start + assignment + prefix_len + leading;
+            multiline_value_start_with_grammar(value, key_indent, syntax, value_start, grammar_ends)
+        };
+
+    // Prefer an initializer equals sign so typed declarations do not stop at
+    // the annotation colon (for example, `api_key: string = ...`).
+    if let Some(result) = line.match_indices('=').find_map(|(assignment, _)| {
+        let raw = &line[assignment..];
+        start_after(assignment, 1, &raw[1..], true)
+    }) {
+        return Some(result);
+    }
+    line.match_indices(':').find_map(|(assignment, _)| {
         let raw = &line[assignment..];
         let (raw_value, prefix_len) = raw
             .strip_prefix(":=")
             .map_or((&raw[1..], 1), |value| (value, 2));
-        let leading = raw_value.len() - raw_value.trim_start().len();
-        let value = raw_value.trim_start();
-        let value_start = line_start + assignment + prefix_len + leading;
-        multiline_value_start_with_grammar(
-            value,
-            leading_indent(line),
-            syntax,
-            value_start,
-            grammar_ends,
-        )
+        start_after(assignment, prefix_len, raw_value, false)
     })
 }
 
@@ -453,6 +462,21 @@ mod tests {
                 .map(|(_, hidden)| hidden)
                 .collect();
             assert_eq!(actual, [true, true, true, true, true, false]);
+        }
+    }
+
+    #[test]
+    fn typed_and_next_line_credential_values_stay_redacted() {
+        let typed = "const api_key: string = `\nfixture-only-value\n`\nordinary = 1\n";
+        let next_line = "const api_key =\n  `fixture-only-value`\nordinary = 1\n";
+        for (language, source, expected) in [
+            ("TypeScript", typed, [true, true, true, false].as_slice()),
+            ("JavaScript", next_line, [true, true, false].as_slice()),
+        ] {
+            let actual: Vec<_> = sensitive_source_lines(source, language)
+                .map(|(_, hidden)| hidden)
+                .collect();
+            assert_eq!(actual, expected, "{language}: {source}");
         }
     }
 

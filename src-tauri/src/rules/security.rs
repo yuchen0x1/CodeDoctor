@@ -26,10 +26,14 @@ pub(crate) fn may_expose_credential(line: &str) -> bool {
     let Some((_, value)) = line.split_once(['=', ':']) else {
         return false;
     };
-    if value.trim().is_empty() {
-        return false;
-    }
     let lower = line.to_ascii_lowercase();
+    if value.trim().is_empty() {
+        // Keep an empty credential assignment visible to the redaction state
+        // machine so a value beginning on the next line cannot leak.
+        return SECRET_KEYWORDS
+            .iter()
+            .any(|keyword| lower.contains(keyword));
+    }
     SECRET_KEYWORDS
         .iter()
         .any(|keyword| lower.contains(keyword))
