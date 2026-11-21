@@ -21,6 +21,12 @@
 - **报告导出**：JSON、Markdown、TXT、HTML、SARIF 2.1.0；CLI 支持按严重度门禁退出。
 - **可选分析器**：默认仅用内置分析，可启用本机已安装的 Ruff 作为增强。
 
+## 最新版本
+
+### 0.2.3（2026-11-21）
+
+SARIF 导出补齐规则索引与完成标记、修复报告对话框与扫描失败诊断的竞态、扩展凭据遮蔽覆盖、发布流水线增加版本互斥。完整变更见[更新记录](docs/releases/release-notes.md)与 [Release v0.2.3](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.2.3)。
+
 ## 快速开始
 
 ### 下载安装
@@ -29,9 +35,9 @@
 
 | 平台 | 下载 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `CodeDoctor_<版本>_x64-setup.exe` 或 `CodeDoctor_<版本>_x64_en-US.msi` | 按向导完成当前用户安装；安装版可在应用内验证并安装签名更新 |
+| Windows x64 | `CodeDoctor_0.2.3_x64-setup.exe` 或 `CodeDoctor_0.2.3_x64_en-US.msi` | 按向导完成当前用户安装；安装版可在应用内验证并安装签名更新 |
 | Windows x64 | `codedoctor.exe` | 免安装，直接运行 |
-| Linux x64 | `CodeDoctor_<版本>_linux_x64-cli.tar.gz` | 终端与 CI 使用，无需 GUI 或 WebView |
+| Linux x64 | `CodeDoctor_0.2.3_linux_x64-cli.tar.gz` | 终端与 CI 使用，无需 GUI 或 WebView |
 
 桌面应用需要 Microsoft Edge WebView2 Runtime；数据只写入当前用户的本地扫描数据库，详见[隐私与数据边界](docs/privacy.md)与[安装和更新](docs/engineering/updating.md)。
 

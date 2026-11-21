@@ -23,6 +23,12 @@ CodeDoctor はオフライン優先のコード品質診断ツールです。Win
 - **レポート出力**: JSON、Markdown、TXT、HTML、SARIF 2.1.0。CLI は重要度ゲートによる終了コードに対応します。
 - **オプションのアナライザー**: 既定では内蔵分析のみ。ローカルにインストール済みの Ruff を有効化できます。
 
+## 最新リリース
+
+### 0.2.3（2026-11-21）
+
+SARIF 出力にルール インデックスと完了マークを追加し、レポート ダイアログとスキャン失敗診断の競合を修正、認証情報マスクのカバレッジを拡張、リリース パイプラインにバージョン排他制御を追加しました。全変更は[リリース ノート](docs/releases/release-notes.md)と [Release v0.2.3](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.2.3) を参照してください。
+
 ## はじめに
 
 ### ダウンロードとインストール
@@ -31,9 +37,9 @@ CodeDoctor はオフライン優先のコード品質診断ツールです。Win
 
 | プラットフォーム | ダウンロード | 説明 |
 | --- | --- | --- |
-| Windows x64 | `CodeDoctor_<version>_x64-setup.exe` または `CodeDoctor_<version>_x64_en-US.msi` | ウィザードに従って現在のユーザーへインストール。インストール版はアプリ内で署名付き更新を確認・適用できます |
+| Windows x64 | `CodeDoctor_0.2.3_x64-setup.exe` または `CodeDoctor_0.2.3_x64_en-US.msi` | ウィザードに従って現在のユーザーへインストール。インストール版はアプリ内で署名付き更新を確認・適用できます |
 | Windows x64 | `codedoctor.exe` | インストール不要でそのまま実行 |
-| Linux x64 | `CodeDoctor_<version>_linux_x64-cli.tar.gz` | ターミナルと CI 向け。GUI や WebView は不要 |
+| Linux x64 | `CodeDoctor_0.2.3_linux_x64-cli.tar.gz` | ターミナルと CI 向け。GUI や WebView は不要 |
 
 デスクトップ アプリには Microsoft Edge WebView2 Runtime が必要です。データは現在のユーザーのローカル スキャン データベースにのみ書き込まれます。詳細は[プライバシーとデータ境界](docs/privacy.md)と[インストールと更新](docs/engineering/updating.md)を参照してください。
 

@@ -23,6 +23,12 @@ CodeDoctor is an offline-first code quality inspection tool. The Windows desktop
 - **Report export**: JSON, Markdown, TXT, HTML, and SARIF 2.1.0; the CLI supports severity-gated exit codes.
 - **Optional analyzers**: built-in analysis only by default; a locally installed Ruff can be enabled as an enhancement.
 
+## Latest release
+
+### 0.2.3 (2026-11-21)
+
+SARIF export gains rule indexes and completion markers, report-dialog and scan-failure diagnostics races are fixed, credential masking coverage is extended, and the release pipeline adds version exclusivity. Full changes: [release notes](docs/releases/release-notes.md) and [Release v0.2.3](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.2.3).
+
 ## Getting started
 
 ### Download and install
@@ -31,9 +37,9 @@ Download the latest version from [Releases](https://github.com/yuchen0x1/CodeDoc
 
 | Platform | Download | Notes |
 | --- | --- | --- |
-| Windows x64 | `CodeDoctor_<version>_x64-setup.exe` or `CodeDoctor_<version>_x64_en-US.msi` | Per-user installation via the setup wizard; installed builds can verify and apply signed in-app updates |
+| Windows x64 | `CodeDoctor_0.2.3_x64-setup.exe` or `CodeDoctor_0.2.3_x64_en-US.msi` | Per-user installation via the setup wizard; installed builds can verify and apply signed in-app updates |
 | Windows x64 | `codedoctor.exe` | Portable build, run directly |
-| Linux x64 | `CodeDoctor_<version>_linux_x64-cli.tar.gz` | For terminals and CI; no GUI or WebView required |
+| Linux x64 | `CodeDoctor_0.2.3_linux_x64-cli.tar.gz` | For terminals and CI; no GUI or WebView required |
 
 The desktop app requires the Microsoft Edge WebView2 Runtime; data is written only to the current user's local scan database. See the [privacy and data boundary notes](docs/privacy.md) and the [installation and update guide](docs/engineering/updating.md).
 
