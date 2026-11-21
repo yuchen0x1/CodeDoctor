@@ -160,6 +160,7 @@ mod tests {
                 status: ScanStatus::Completed,
                 started_at: Some("1".into()),
                 completed_at: Some("2".into()),
+                failure_message: None,
                 config: json!({}),
                 rule_version: "rules-1".into(),
                 analyzer_versions: json!({}),
@@ -308,6 +309,47 @@ mod tests {
         assert!(css.contains("--font-mono"));
         assert!(!css.contains("var(--color-"));
         assert!(!css.contains("http"));
+    }
+
+    #[test]
+    fn markdown_treats_untrusted_fields_and_multiline_evidence_as_literal_text() {
+        use pulldown_cmark::{Event, Parser, Tag};
+
+        let mut scan = snapshot();
+        let payload = "</h3><script>alert(1)</script> ![remote](https://example.invalid/image) [link](javascript:alert)";
+        scan.run.id = "run\n\n# forged heading".into();
+        scan.issues[0].title = payload.into();
+        scan.issues[0].explanation = format!("{payload}\n\n# forged heading");
+        scan.issues[0].impact = payload.into();
+        scan.issues[0].recommendation = payload.into();
+        let evidence = "first line\n\n```text\n<img src=x onerror=alert(2)>\n```````\n![remote](https://example.invalid/evidence)\n  last `line`  ";
+        scan.issues[0].evidence = evidence.into();
+        let markdown = render(&scan, ReportFormat::Markdown).unwrap();
+        let mut headings = 0;
+        let mut blocks = Vec::new();
+        let mut in_block = false;
+        for event in Parser::new(&markdown) {
+            match event {
+                Event::Html(_) | Event::InlineHtml(_) => panic!("active HTML in report: {event:?}"),
+                Event::Start(Tag::Image { .. } | Tag::Link { .. }) => {
+                    panic!("active link in report")
+                }
+                Event::Start(Tag::Heading { .. }) => headings += 1,
+                Event::Start(Tag::CodeBlock(_)) => {
+                    blocks.push(String::new());
+                    in_block = true;
+                }
+                Event::End(pulldown_cmark::TagEnd::CodeBlock) => in_block = false,
+                Event::Text(text) if in_block => blocks.last_mut().unwrap().push_str(&text),
+                _ => {}
+            }
+        }
+        assert_eq!(headings, 4, "untrusted input changed the report outline");
+        assert_eq!(blocks, vec![format!("{evidence}\n")]);
+        let plain = render(&scan, ReportFormat::Txt).unwrap();
+        assert!(plain.contains(payload));
+        assert!(plain.contains(evidence));
+        assert!(plain.contains("run\n\n# forged heading"));
     }
 
     #[test]

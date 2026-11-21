@@ -10,7 +10,7 @@ mod tests {
     #[test]
     fn migration_and_repository_round_trip_scan_data() {
         let mut storage = Storage::in_memory().unwrap();
-        assert_eq!(storage.schema_version().unwrap(), 2);
+        assert_eq!(storage.schema_version().unwrap(), 3);
 
         storage.insert_project(&test_project()).unwrap();
         storage
@@ -36,6 +36,284 @@ mod tests {
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].rule_id, "rule.unused-import");
         assert_eq!(issues[0].severity, Severity::Medium);
+    }
+
+    fn legacy_v2_storage() -> Storage {
+        let legacy = Storage {
+            conn: rusqlite::Connection::open_in_memory().unwrap(),
+        };
+        legacy
+            .conn
+            .execute_batch(super::migrations::MIGRATION_V1)
+            .unwrap();
+        legacy
+            .conn
+            .execute_batch(super::migrations::MIGRATION_V2)
+            .unwrap();
+        legacy
+            .conn
+            .execute_batch("INSERT INTO schema_metadata VALUES (1, 'legacy-v1'), (2, 'legacy-v2');")
+            .unwrap();
+        legacy
+    }
+
+    #[test]
+    fn v2_upgrade_preserves_history_configuration_and_cache_and_is_idempotent() {
+        let mut legacy = legacy_v2_storage();
+        legacy.insert_project(&test_project()).unwrap();
+        let config =
+            r#"{ "maxLineLength": 91, "enabledAnalyzers": ["ruff"], "custom": {"keep": true} }"#;
+        for status in ["failed", "completed", "canceled", "running"] {
+            legacy
+                .conn
+                .execute(
+                    "INSERT INTO scan_runs
+                 (id, project_id, status, started_at, completed_at, config, rule_version,
+                  analyzer_versions, total_files, scanned_files, total_issues)
+                 VALUES (?1, 'project-1', ?1, 'start', ?2, ?3, 'legacy-rules',
+                         '{\"ruff\":\"legacy\"}', 10, 8, 1)",
+                    rusqlite::params![status, (status != "running").then_some("end"), config],
+                )
+                .unwrap();
+        }
+        legacy.upsert_file(&test_file("failed")).unwrap();
+        legacy
+            .insert_issue("failed", &test_issue("legacy-issue", "unused import os"))
+            .unwrap();
+        legacy
+            .save_score("failed", &test_score("legacy-score"))
+            .unwrap();
+        legacy
+            .put_cached_issues(
+                "legacy-key",
+                "project-1",
+                &[test_issue("cached", "cache evidence")],
+            )
+            .unwrap();
+        let cache_before: (String, String) = legacy
+            .conn
+            .query_row(
+                "SELECT issues_json, created_at FROM scan_cache WHERE cache_key = 'legacy-key'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        let mut storage = Storage::new(legacy.conn).unwrap();
+        assert_eq!(storage.schema_version().unwrap(), 3);
+        // Reopening an already-upgraded database must not repeat ALTER TABLE.
+        super::migrations::run(&mut storage.conn).unwrap();
+        let versions: Vec<(i64, String)> = storage
+            .conn
+            .prepare("SELECT version, applied_at FROM schema_metadata ORDER BY version")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(versions.len(), 3);
+        assert_eq!(versions[0], (1, "legacy-v1".into()));
+        assert_eq!(versions[1], (2, "legacy-v2".into()));
+        assert_eq!(storage.list_scan_runs("project-1").unwrap().len(), 4);
+        for id in ["failed", "completed", "canceled", "running"] {
+            let run = storage.get_scan_run(id).unwrap().unwrap();
+            assert!(run.failure_message.is_none());
+            assert_eq!(super::scan_status_name(&run.status), id);
+            assert_eq!(run.started_at.as_deref(), Some("start"));
+            assert_eq!(
+                run.completed_at.as_deref(),
+                (id != "running").then_some("end")
+            );
+            assert_eq!(
+                (run.total_files, run.scanned_files, run.total_issues),
+                (10, 8, 1)
+            );
+            assert_eq!(run.rule_version, "legacy-rules");
+            assert_eq!(run.analyzer_versions, json!({"ruff": "legacy"}));
+            let stored_config: String = storage
+                .conn
+                .query_row("SELECT config FROM scan_runs WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(stored_config, config);
+        }
+        assert_eq!(
+            storage.get_project("project-1").unwrap(),
+            Some(test_project())
+        );
+        assert_eq!(
+            storage.list_files_for_run("failed").unwrap(),
+            vec![test_file("failed")]
+        );
+        assert_eq!(storage.list_issues("failed").unwrap()[0].id, "legacy-issue");
+        assert_eq!(
+            storage.get_score("failed").unwrap(),
+            Some(test_score("legacy-score"))
+        );
+        assert_eq!(
+            storage.get_cached_issues("legacy-key").unwrap(),
+            Some(vec![test_issue("cached", "cache evidence")])
+        );
+        let cache_after: (String, String) = storage
+            .conn
+            .query_row(
+                "SELECT issues_json, created_at FROM scan_cache WHERE cache_key = 'legacy-key'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(cache_after, cache_before);
+    }
+
+    #[test]
+    fn v3_schema_and_version_are_rolled_back_together_on_migration_failure() {
+        let mut legacy = legacy_v2_storage();
+        legacy
+            .conn
+            .execute_batch(
+                "CREATE TRIGGER reject_v3 BEFORE INSERT ON schema_metadata WHEN NEW.version = 3
+             BEGIN SELECT RAISE(ABORT, 'injected migration failure'); END;",
+            )
+            .unwrap();
+        assert!(super::migrations::run(&mut legacy.conn).is_err());
+        assert_eq!(legacy.schema_version().unwrap(), 2);
+        let columns: i64 = legacy.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('scan_runs') WHERE name = 'failure_message'",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(columns, 0);
+        legacy.conn.execute_batch("DROP TRIGGER reject_v3").unwrap();
+        super::migrations::run(&mut legacy.conn).unwrap();
+        assert_eq!(legacy.schema_version().unwrap(), 3);
+    }
+
+    #[test]
+    fn finishing_failure_is_atomic_bounded_and_does_not_overwrite_a_terminal_run() {
+        use crate::error::AppError;
+        let mut storage = Storage::in_memory().unwrap();
+        storage.insert_project(&test_project()).unwrap();
+        let original = test_scan_run("run-1", ScanStatus::Running);
+        storage.create_scan_run(&original).unwrap();
+        storage
+            .insert_issue("run-1", &test_issue("issue-1", "evidence"))
+            .unwrap();
+        let error = AppError::Validation(format!("\n\0失败\t{}", "错".repeat(600)));
+        storage
+            .conn
+            .execute_batch(
+                "CREATE TRIGGER reject_finish BEFORE UPDATE OF failure_message ON scan_runs
+             BEGIN SELECT RAISE(ABORT, 'injected finish failure'); END;",
+            )
+            .unwrap();
+        assert!(
+            storage
+                .finish_scan_run("run-1", ScanStatus::Failed, "done", 20, 15, Some(&error))
+                .is_err()
+        );
+        assert_eq!(
+            storage.get_scan_run("run-1").unwrap(),
+            Some(original.clone())
+        );
+        storage
+            .conn
+            .execute_batch("DROP TRIGGER reject_finish")
+            .unwrap();
+        assert_eq!(
+            storage
+                .finish_scan_run("run-1", ScanStatus::Failed, "done", 20, 15, Some(&error))
+                .unwrap(),
+            1
+        );
+        let finished = storage.get_scan_run("run-1").unwrap().unwrap();
+        assert_eq!(finished.status, ScanStatus::Failed);
+        assert_eq!(finished.completed_at.as_deref(), Some("done"));
+        assert_eq!(
+            (
+                finished.total_files,
+                finished.scanned_files,
+                finished.total_issues
+            ),
+            (20, 15, 1)
+        );
+        let message = finished.failure_message.as_deref().unwrap();
+        assert!(message.starts_with("失败"));
+        assert!(message.chars().count() <= 512);
+        assert!(!message.chars().any(char::is_control));
+        assert_eq!(finished.config, original.config);
+        assert_eq!(storage.list_scan_runs("project-1").unwrap()[0], finished);
+        assert!(
+            storage
+                .finish_scan_run("run-1", ScanStatus::Completed, "later", 0, 0, None)
+                .is_err()
+        );
+        assert_eq!(storage.get_scan_run("run-1").unwrap(), Some(finished));
+    }
+
+    #[test]
+    fn nonfailed_runs_never_store_diagnostics_and_nonterminal_finish_is_rejected() {
+        use crate::error::AppError;
+        let mut storage = Storage::in_memory().unwrap();
+        storage.insert_project(&test_project()).unwrap();
+        let error = AppError::Validation("should not persist".into());
+        for status in [
+            ScanStatus::Queued,
+            ScanStatus::Running,
+            ScanStatus::Paused,
+            ScanStatus::Canceling,
+            ScanStatus::Canceled,
+            ScanStatus::Completed,
+        ] {
+            let id = super::scan_status_name(&status);
+            let mut run = test_scan_run(id, status);
+            run.failure_message = Some("should not persist".into());
+            storage
+                .with_phase(|phase| phase.create_scan_run(&run))
+                .unwrap();
+            assert!(
+                storage
+                    .get_scan_run(id)
+                    .unwrap()
+                    .unwrap()
+                    .failure_message
+                    .is_none()
+            );
+            if matches!(status, ScanStatus::Completed | ScanStatus::Canceled) {
+                // Even a stale diagnostic from a malformed row is cleared on success/cancel.
+                storage
+                    .conn
+                    .execute(
+                        "UPDATE scan_runs SET failure_message = 'stale' WHERE id = ?1",
+                        [id],
+                    )
+                    .unwrap();
+                storage
+                    .finish_scan_run(id, status, "done", 1, 1, Some(&error))
+                    .unwrap();
+                assert!(
+                    storage
+                        .get_scan_run(id)
+                        .unwrap()
+                        .unwrap()
+                        .failure_message
+                        .is_none()
+                );
+            } else {
+                assert!(
+                    storage
+                        .finish_scan_run(id, status, "done", 1, 1, Some(&error))
+                        .is_err()
+                );
+                assert!(
+                    storage
+                        .get_scan_run(id)
+                        .unwrap()
+                        .unwrap()
+                        .completed_at
+                        .is_none()
+                );
+            }
+        }
     }
 
     #[test]
@@ -241,6 +519,7 @@ mod tests {
             status,
             started_at: Some("2026-11-17T00:00:00Z".to_owned()),
             completed_at: None,
+            failure_message: None,
             config: json!({"mode": "full"}),
             rule_version: "rules-1".to_owned(),
             analyzer_versions: json!({}),
@@ -333,7 +612,7 @@ use crate::domain::types::{
     IssueFingerprint, ProjectRecord, PromptArtifact, PromptMode, ScanRun, ScanStatus,
     ScoreSnapshot, Severity,
 };
-use crate::error::AppError;
+use crate::error::{AppError, scan_failure_message};
 pub use migrations::MIGRATION_V1;
 use rusqlite::{Connection, Transaction, params};
 
@@ -462,12 +741,15 @@ impl Storage {
     }
 
     pub fn create_scan_run(&mut self, run: &ScanRun) -> Result<(), AppError> {
+        let failure_message = (run.status == ScanStatus::Failed)
+            .then(|| run.failure_message.as_deref().map(scan_failure_message))
+            .flatten();
         let transaction = self.conn.transaction()?;
         transaction.execute(
             "INSERT INTO scan_runs
              (id, project_id, status, started_at, completed_at, config, rule_version,
-              analyzer_versions, total_files, scanned_files, total_issues)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+              analyzer_versions, total_files, scanned_files, total_issues, failure_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 run.id,
                 run.project_id,
@@ -480,6 +762,7 @@ impl Storage {
                 run.total_files,
                 run.scanned_files,
                 run.total_issues,
+                failure_message,
             ],
         )?;
         transaction.commit()?;
@@ -662,7 +945,7 @@ impl Storage {
     pub fn get_scan_run(&self, run_id: &str) -> Result<Option<ScanRun>, AppError> {
         let mut statement = self.conn.prepare(
             "SELECT id, project_id, status, started_at, completed_at, config, rule_version,
-                    analyzer_versions, total_files, scanned_files, total_issues
+                    analyzer_versions, total_files, scanned_files, total_issues, failure_message
              FROM scan_runs WHERE id = ?1",
         )?;
         let mut rows = statement
@@ -674,7 +957,7 @@ impl Storage {
     pub fn list_scan_runs(&self, project_id: &str) -> Result<Vec<ScanRun>, AppError> {
         let mut statement = self.conn.prepare(
             "SELECT id, project_id, status, started_at, completed_at, config, rule_version,
-                    analyzer_versions, total_files, scanned_files, total_issues
+                    analyzer_versions, total_files, scanned_files, total_issues, failure_message
              FROM scan_runs WHERE project_id = ?1 AND config != '{\"phase\":\"index\"}'
              ORDER BY started_at DESC",
         )?;
@@ -734,6 +1017,8 @@ impl Storage {
         )?)
     }
 
+    /// Commit terminal status, counts and safe failure text in one atomic update.
+    /// Only failed runs retain diagnostics; never persist Debug/raw error details.
     pub fn finish_scan_run(
         &mut self,
         run_id: &str,
@@ -741,10 +1026,22 @@ impl Storage {
         completed_at: &str,
         total_files: u32,
         scanned_files: u32,
+        failure: Option<&AppError>,
     ) -> Result<u32, AppError> {
+        if !matches!(
+            status,
+            ScanStatus::Completed | ScanStatus::Canceled | ScanStatus::Failed
+        ) {
+            return Err(AppError::Validation(
+                "scan status is not terminal".to_owned(),
+            ));
+        }
+        let failure_message = (status == ScanStatus::Failed)
+            .then(|| failure.map(|error| scan_failure_message(&error.to_string())))
+            .flatten();
         Ok(self.conn.query_row(
             "UPDATE scan_runs SET status = ?2, completed_at = ?3,
-                total_files = ?4, scanned_files = ?5,
+                total_files = ?4, scanned_files = ?5, failure_message = ?6,
                 total_issues = (SELECT COUNT(*) FROM issues WHERE scan_run_id = ?1)
              WHERE id = ?1 AND completed_at IS NULL RETURNING total_issues",
             params![
@@ -752,7 +1049,8 @@ impl Storage {
                 scan_status_name(&status),
                 completed_at,
                 total_files,
-                scanned_files
+                scanned_files,
+                failure_message,
             ],
             |row| row.get(0),
         )?)
@@ -767,6 +1065,7 @@ impl Storage {
                         ELSE '{}' END, '$.interrupted', json('true'))
                     ELSE config END,
                 status = CASE WHEN status = 'canceling' THEN 'canceled' ELSE 'failed' END,
+                failure_message = CASE WHEN status = 'canceling' THEN NULL ELSE ?2 END,
                 completed_at = COALESCE(completed_at, ?1),
                 total_files = MAX(total_files, (SELECT COUNT(*) FROM files
                     WHERE scan_run_id = scan_runs.id AND (excluded_reason IS NULL OR size_bytes > 0))),
@@ -774,7 +1073,10 @@ impl Storage {
                     WHERE scan_run_id = scan_runs.id AND (excluded_reason IS NULL OR size_bytes > 0))),
                 total_issues = (SELECT COUNT(*) FROM issues WHERE scan_run_id = scan_runs.id)
              WHERE status IN ('queued', 'running', 'paused', 'canceling')",
-            params![recovered_at],
+            params![
+                recovered_at,
+                "scan was interrupted before completion; the original failure reason is unavailable. Please retry the scan.",
+            ],
         )?;
         Ok(())
     }
@@ -954,11 +1256,14 @@ impl<'conn> PhaseTransaction<'conn> {
     }
 
     pub fn create_scan_run(&mut self, run: &ScanRun) -> Result<(), AppError> {
+        let failure_message = (run.status == ScanStatus::Failed)
+            .then(|| run.failure_message.as_deref().map(scan_failure_message))
+            .flatten();
         self.transaction.execute(
             "INSERT INTO scan_runs
              (id, project_id, status, started_at, completed_at, config, rule_version,
-              analyzer_versions, total_files, scanned_files, total_issues)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+              analyzer_versions, total_files, scanned_files, total_issues, failure_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 run.id,
                 run.project_id,
@@ -971,6 +1276,7 @@ impl<'conn> PhaseTransaction<'conn> {
                 run.total_files,
                 run.scanned_files,
                 run.total_issues,
+                failure_message,
             ],
         )?;
         Ok(())
@@ -1296,6 +1602,7 @@ fn row_to_scan_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScanRun> {
         total_files: row.get(8)?,
         scanned_files: row.get(9)?,
         total_issues: row.get(10)?,
+        failure_message: row.get(11)?,
     })
 }
 

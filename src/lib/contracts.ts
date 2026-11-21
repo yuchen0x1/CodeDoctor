@@ -46,6 +46,7 @@ export interface ScanRun {
   totalFiles: number;
   scannedFiles: number;
   totalIssues: number;
+  failureMessage?: string | null;
   scoreSummary?: { overallScore: number; coverage: number } | null;
 }
 

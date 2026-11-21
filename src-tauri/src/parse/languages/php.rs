@@ -31,6 +31,7 @@ fn php_imports(node: Node, text: &str) -> Vec<ImportInfo> {
             module,
             names: vec![ImportBinding { name, alias }],
             range: Default::default(),
+            binding_range: None,
             dynamic: false,
         });
     }

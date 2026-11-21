@@ -19,6 +19,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup
       - run: node scripts/release/version.mjs
+      - run: node --test scripts/release/publish.test.mjs
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build

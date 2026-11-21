@@ -53,6 +53,7 @@ fn go_import_spec(spec: Node, bytes: &[u8], _text: &str) -> Option<ImportInfo> {
         module,
         names,
         range: Default::default(),
+        binding_range: None,
         dynamic: false,
     })
 }

@@ -59,6 +59,7 @@ fn snapshot(root: &Path, relative: &str, bytes: &[u8], line: u32, end: u32) -> A
             status: ScanStatus::Completed,
             started_at: Some("1".into()),
             completed_at: Some("2".into()),
+            failure_message: None,
             config: json!({}),
             rule_version: "test".into(),
             analyzer_versions: json!({}),
@@ -290,6 +291,179 @@ fn masks_credential_lines_and_multiline_private_keys_in_other_findings() {
     assert!(!context.text.contains("fake-fixture-only"));
     assert!(!context.text.contains("placeholder-fixture-key"));
     assert!(open_issue_source_state(&state, RUN, ISSUE).is_err());
+}
+
+#[test]
+fn redacts_multiline_credential_values_when_excerpt_starts_after_the_key() {
+    let fixture = Fixture::create();
+    let cases = [
+        (
+            "triple-quoted Python",
+            "password = \"\"\"\n",
+            "  synthetic-python-secret-marker\n",
+            "\"\"\"\n",
+        ),
+        (
+            "JavaScript template literal",
+            "api_key = `\n",
+            "  synthetic-backtick-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "TypeScript annotated template literal",
+            "const api_key: string = `\n",
+            "  synthetic-typescript-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "TypeScript annotation containing an equals sign",
+            "const api_key: { format: \"x=y\" } = `\n",
+            "  synthetic-typescript-type-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "Python annotated triple-quoted string",
+            "password: str = \"\"\"\n",
+            "  synthetic-python-annotated-secret-marker\n",
+            "\"\"\"\n",
+        ),
+        (
+            "Python annotated single-quoted string",
+            "password: str = '''\n",
+            "  synthetic-python-single-secret-marker\n",
+            "'''\n",
+        ),
+        (
+            "Go short declaration raw string",
+            "api_key := `\n",
+            "  synthetic-go-secret-marker\n",
+            "`\n",
+        ),
+        (
+            "YAML block scalar",
+            "  secret: |\n",
+            "    synthetic-yaml-secret-marker\n",
+            "  ordinary: value\n",
+        ),
+        (
+            "YAML block scalar with an equals sign in its comment",
+            "  secret: | # setting=value\n",
+            "    synthetic-yaml-comment-secret-marker\n",
+            "  ordinary: value\n",
+        ),
+        (
+            "YAML folded scalar with an equals sign in its comment",
+            "  secret: >- # setting=value\n",
+            "    synthetic-yaml-folded-secret-marker\n",
+            "  ordinary: value\n",
+        ),
+    ];
+
+    for (name, opener, secret, closer) in cases {
+        let text = format!(
+            "{}{opener}{secret}{closer}{}",
+            "preamble\n".repeat(8),
+            (1..=20)
+                .map(|line| format!("ordinary code {line}\n"))
+                .collect::<String>()
+        );
+        let state = fixture.directory_state("example.py", text.as_bytes(), 16, 16);
+        let context = read(&state);
+        assert!(context.redacted, "{name}");
+        assert!(
+            context.text.lines().any(|line| line == "[疑似凭据已隐藏]"),
+            "{name} continuation should be masked"
+        );
+        assert!(!context.text.contains(secret.trim()), "{name}");
+        assert!(context.text.contains("ordinary code 10"), "{name}");
+        assert!(
+            open_issue_source_state(&state, RUN, ISSUE).is_err(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn redacts_python_prefixed_multiline_credentials() {
+    let fixture = Fixture::create();
+    for prefix in [
+        "r", "R", "u", "U", "b", "B", "f", "F", "t", "T", "fr", "rf", "br", "rb", "tr", "rt", "Fr",
+        "rF", "BR", "RB", "Tr", "rT",
+    ] {
+        for quote in ["\"\"\"", "'''"] {
+            let text = format!(
+                "password: str = {prefix}{quote}\nsynthetic-prefixed-credential-marker\n{quote}\nprint('done')\n"
+            );
+            let state = fixture.directory_state("example.py", text.as_bytes(), 2, 2);
+            let context = read(&state);
+            assert!(context.redacted, "{prefix}{quote}");
+            assert!(!context.can_open_natively, "{prefix}{quote}");
+            assert!(
+                !context
+                    .text
+                    .contains("synthetic-prefixed-credential-marker"),
+                "{prefix}{quote}"
+            );
+            assert!(context.text.contains("print('done')"), "{prefix}{quote}");
+            assert!(
+                open_issue_source_state(&state, RUN, ISSUE).is_err(),
+                "{prefix}{quote}"
+            );
+        }
+    }
+}
+
+#[test]
+fn redacts_parenthesized_multiline_credentials() {
+    let fixture = Fixture::create();
+    for opener in [
+        "password: str = (\n    r\"\"\"",
+        "password = (f\"\"\"",
+        "password = (\n    # a comment\n    \n    fr\"\"\"",
+    ] {
+        let text = format!(
+            "{opener}\nsynthetic-parenthesized-credential-marker\n\"\"\"\n)\nprint('done')\n"
+        );
+        let state = fixture.directory_state("example.py", text.as_bytes(), 3, 3);
+        let context = read(&state);
+        assert!(context.redacted);
+        assert!(
+            !context
+                .text
+                .contains("synthetic-parenthesized-credential-marker")
+        );
+        assert!(context.text.contains("print('done')"));
+        assert!(!context.can_open_natively);
+    }
+}
+
+#[test]
+fn redacts_concatenated_credential_when_excerpt_starts_after_the_assignment() {
+    let fixture = Fixture::create();
+    let text = format!(
+        "password = (\n{}    \"synthetic-concatenated-credential\"\n)\nprint('done')\n",
+        "    \"part )\"\n".repeat(12)
+    );
+    let state = fixture.directory_state("example.py", text.as_bytes(), 14, 14);
+    let context = read(&state);
+    assert!(context.start_line > 1);
+    assert!(context.redacted);
+    assert!(!context.text.contains("synthetic-concatenated-credential"));
+    assert!(!context.text.contains("part )"));
+    assert!(context.text.contains("print('done')"));
+    assert!(!context.can_open_natively);
+    assert!(open_issue_source_state(&state, RUN, ISSUE).is_err());
+}
+
+#[test]
+fn keeps_unrelated_multiline_code_visible() {
+    let fixture = Fixture::create();
+    let text = "message = \"\"\"\nordinary synthetic text marker\n\"\"\"\nprint('done')\n";
+    let state = fixture.directory_state("example.py", text.as_bytes(), 2, 2);
+    let context = read(&state);
+    assert!(!context.redacted);
+    assert!(context.text.contains("ordinary synthetic text marker"));
+    assert!(context.text.contains("print('done')"));
 }
 
 #[test]

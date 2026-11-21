@@ -3,6 +3,7 @@ use rusqlite::Connection;
 
 pub const MIGRATION_V1: &str = include_str!("../../migrations/0001_initial.sql");
 pub const MIGRATION_V2: &str = include_str!("../../migrations/0002_scan_cache.sql");
+pub const MIGRATION_V3: &str = include_str!("../../migrations/0003_scan_failure_message.sql");
 
 pub fn run(conn: &mut Connection) -> Result<(), AppError> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -33,6 +34,14 @@ pub fn run(conn: &mut Connection) -> Result<(), AppError> {
         transaction.execute_batch(MIGRATION_V2)?;
         transaction.execute(
             "INSERT INTO schema_metadata (version, applied_at) VALUES (2, datetime('now'))",
+            [],
+        )?;
+    }
+
+    if current_version < 3 {
+        transaction.execute_batch(MIGRATION_V3)?;
+        transaction.execute(
+            "INSERT INTO schema_metadata (version, applied_at) VALUES (3, datetime('now'))",
             [],
         )?;
     }

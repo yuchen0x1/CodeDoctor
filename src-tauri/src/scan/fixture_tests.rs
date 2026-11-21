@@ -26,9 +26,11 @@ fn cache_key_changes_when_file_or_configuration_changes() {
 
 #[test]
 fn corrected_source_positions_do_not_reuse_legacy_rule_cache() {
-    let legacy = rule_cache_key("project", "main.py", "hash-a", "rules-2", "{}");
     let current = rule_cache_key("project", "main.py", "hash-a", RULE_VERSION, "{}");
-    assert_ne!(legacy, current);
+    for version in ["rules-2", "rules-3", "rules-4"] {
+        let legacy = rule_cache_key("project", "main.py", "hash-a", version, "{}");
+        assert_ne!(legacy, current);
+    }
 }
 
 #[test]
@@ -85,6 +87,7 @@ fn run_record(run_id: &str, status: ScanStatus) -> ScanRun {
         status,
         started_at: Some((now_millis() - 1500).to_string()),
         completed_at: None,
+        failure_message: None,
         config: json!({"maxLineLength": 80}),
         rule_version: RULE_VERSION.into(),
         analyzer_versions: json!({}),
@@ -115,6 +118,261 @@ fn seed_job(state: &AppState, run_id: &str, root: &Path) -> ScanParams {
 }
 
 #[test]
+fn missing_project_job_persists_safe_failure_for_reopened_history() {
+    let fixture = Fixture::new();
+    let db = fixture.0.join("failure.db");
+    let db = db.to_str().unwrap();
+    let missing = fixture.0.join("private-project-token-missing");
+    let persisted;
+    {
+        let state = AppState::open(db).unwrap();
+        register_project(&state, &missing);
+        let params = seed_job(&state, "missing-path", &missing);
+        let original_config = get_scan_state(&state, "missing-path").unwrap().run.config;
+        let (events_tx, events_rx) = mpsc::channel();
+        let sink: EventSink = Box::new(move |event| {
+            events_tx.send(event.clone()).unwrap();
+        });
+        let error = run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap_err();
+        assert_eq!(error.to_string(), "filesystem item was not found");
+        persisted = get_scan_state(&state, "missing-path").unwrap().run;
+        assert_eq!(persisted.status, ScanStatus::Failed);
+        assert!(persisted.completed_at.is_some());
+        assert_eq!(
+            persisted.failure_message.as_deref(),
+            Some("filesystem item was not found")
+        );
+        assert_eq!(persisted.config, original_config);
+        let event = events_rx
+            .try_iter()
+            .find(|event| event.stage == "done")
+            .unwrap();
+        assert_eq!(event.status, "failed");
+        assert_eq!(
+            event.message.as_deref(),
+            Some("扫描失败：filesystem item was not found")
+        );
+        let json = serde_json::to_string(&persisted).unwrap();
+        assert!(!json.contains("private-project-token"));
+        assert!(!json.contains("interrupted"));
+    }
+    let reopened = AppState::open(db).unwrap();
+    assert_eq!(
+        get_scan_state(&reopened, "missing-path").unwrap().run,
+        persisted
+    );
+    assert_eq!(
+        reopened
+            .storage()
+            .unwrap()
+            .list_scan_runs("fixture")
+            .unwrap(),
+        vec![persisted]
+    );
+}
+
+#[test]
+fn multiline_credentials_stay_redacted_through_cache_storage_and_reports() {
+    use crate::report::{ReportFormat, render_with_score};
+    use crate::score::{ScanSnapshot, calculate_score};
+
+    let fixture = Fixture::new();
+    let secret = "syntheticcredentialsegment".repeat(7);
+    let ordinary = "z".repeat(160);
+    fs::write(
+        fixture.0.join("main.py"),
+        format!("password: str = \"\"\"\n{secret}\n\"\"\"\npassword: str = f\"\"\"\n{secret}\n\"\"\"\npassword: str = (\n    r\"\"\"\n{secret}\n\"\"\"\n)\npassword = (\n    \"part-one\"\n    \"{secret}\"\n)\npassword = make_client(\"synthetic-call-credential\").system(\"cmd\")\n{ordinary}\n"),
+    )
+    .unwrap();
+    let state = AppState::in_memory().unwrap();
+    register_project(&state, &fixture.0);
+    let sink: EventSink = Box::new(|_| {});
+    for id in ["redaction-first", "redaction-cached"] {
+        let params = seed_job(&state, id, &fixture.0);
+        run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
+        let store = state.storage().unwrap();
+        let run = store.get_scan_run(id).unwrap().unwrap();
+        assert_eq!(run.status, ScanStatus::Completed);
+        let snapshot = ScanSnapshot::load(&store, run).unwrap();
+        assert!(snapshot.issues.iter().any(|issue| {
+            issue.rule_id == "quality.long-line"
+                && issue.start_line == 2
+                && issue.evidence == "疑似凭据已隐藏"
+        }));
+        assert!(snapshot.issues.iter().any(|issue| {
+            issue.rule_id == "quality.long-line" && issue.evidence.contains(&ordinary)
+        }));
+        assert!(snapshot.issues.iter().any(|issue| {
+            issue.rule_id == "security.dangerous-exec" && issue.evidence == "疑似凭据已隐藏"
+        }));
+        assert!(
+            !serde_json::to_string(&snapshot.issues)
+                .unwrap()
+                .contains(&secret)
+        );
+        assert!(
+            !serde_json::to_string(&snapshot.issues)
+                .unwrap()
+                .contains("synthetic-call-credential")
+        );
+        let file = store.get_file_for_run(id, "main.py").unwrap().unwrap();
+        let cache_key = rule_cache_key(
+            "fixture",
+            "main.py",
+            &file.content_hash[..32],
+            RULE_VERSION,
+            &serde_json::to_string(&params.config).unwrap(),
+        );
+        let cached = store.get_cached_issues(&cache_key).unwrap().unwrap();
+        assert!(!serde_json::to_string(&cached).unwrap().contains(&secret));
+        assert!(
+            !serde_json::to_string(&cached)
+                .unwrap()
+                .contains("synthetic-call-credential")
+        );
+        let legacy_key = rule_cache_key(
+            "fixture",
+            "main.py",
+            &file.content_hash[..32],
+            "rules-3",
+            &serde_json::to_string(&params.config).unwrap(),
+        );
+        assert_ne!(cache_key, legacy_key);
+        let score = calculate_score(&snapshot);
+        for format in [
+            ReportFormat::Json,
+            ReportFormat::Markdown,
+            ReportFormat::Txt,
+            ReportFormat::Html,
+            ReportFormat::Sarif,
+        ] {
+            let report = render_with_score(&snapshot, &score, format).unwrap();
+            assert!(
+                !report.contains(&secret) && !report.contains("synthetic-call-credential"),
+                "{format:?} exposed credential evidence"
+            );
+        }
+    }
+}
+
+#[test]
+fn redacted_parameters_keep_distinct_locations_through_repeated_scans() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.0.join(".env.py"),
+        "def work(first, second):\n    password = \"synthetic-secret-value\"\n    return 1\n",
+    )
+    .unwrap();
+    let state = AppState::in_memory().unwrap();
+    register_project(&state, &fixture.0);
+    let sink: EventSink = Box::new(|_| {});
+    let mut fingerprints = Vec::new();
+    for id in ["parameters-first", "parameters-cached"] {
+        let params = seed_job(&state, id, &fixture.0);
+        run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
+        let store = state.storage().unwrap();
+        assert_eq!(
+            store.get_scan_run(id).unwrap().unwrap().status,
+            ScanStatus::Completed
+        );
+        let issues = store.list_issues(id).unwrap();
+        let mut parameters: Vec<_> = issues
+            .iter()
+            .filter(|issue| issue.rule_id == "quality.unused-parameter")
+            .collect();
+        parameters.sort_by_key(|issue| issue.start_column);
+        assert_eq!(parameters.len(), 2);
+        assert!(parameters.iter().all(|issue| {
+            issue.file_path == ".env.py" && issue.evidence == "疑似凭据已隐藏"
+        }));
+        assert_ne!(parameters[0].id, parameters[1].id);
+        assert_ne!(parameters[0].fingerprint, parameters[1].fingerprint);
+        assert_eq!(
+            (parameters[0].start_line, parameters[0].start_column),
+            (1, 10)
+        );
+        assert_eq!(
+            (parameters[1].start_line, parameters[1].start_column),
+            (1, 17)
+        );
+        assert!(
+            !serde_json::to_string(&issues)
+                .unwrap()
+                .contains("synthetic-secret-value")
+        );
+        let current: Vec<_> = parameters
+            .iter()
+            .map(|issue| issue.fingerprint.clone())
+            .collect();
+        if fingerprints.is_empty() {
+            fingerprints = current;
+        } else {
+            assert_eq!(fingerprints, current);
+        }
+    }
+}
+
+#[test]
+fn redacted_import_bindings_keep_distinct_locations_through_repeated_scans() {
+    let fixture = Fixture::new();
+    fs::write(fixture.0.join(".env.py"), "import os, sys\n").unwrap();
+    fs::write(
+        fixture.0.join("main.py"),
+        "import os, sys  # password = \"fixture-only-value\"\n",
+    )
+    .unwrap();
+    let state = AppState::in_memory().unwrap();
+    register_project(&state, &fixture.0);
+    let sink: EventSink = Box::new(|_| {});
+    let mut fingerprints = Vec::new();
+    for id in ["imports-first", "imports-cached"] {
+        let params = seed_job(&state, id, &fixture.0);
+        run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
+        let store = state.storage().unwrap();
+        assert_eq!(
+            store.get_scan_run(id).unwrap().unwrap().status,
+            ScanStatus::Completed
+        );
+        let issues = store.list_issues(id).unwrap();
+        let mut current = Vec::new();
+        for path in [".env.py", "main.py"] {
+            let mut imports: Vec<_> = issues
+                .iter()
+                .filter(|issue| issue.file_path == path && issue.rule_id == "quality.unused-import")
+                .collect();
+            imports.sort_by_key(|issue| issue.start_column);
+            assert_eq!(imports.len(), 2, "{path} in {id}: {imports:?}");
+            assert_ne!(imports[0].id, imports[1].id);
+            assert_ne!(imports[0].fingerprint, imports[1].fingerprint);
+            for (issue, (start, end)) in imports.into_iter().zip([(8, 10), (12, 15)]) {
+                assert_eq!(
+                    (
+                        issue.start_line,
+                        issue.start_column,
+                        issue.end_line,
+                        issue.end_column
+                    ),
+                    (1, start, 1, end),
+                    "{path} in {id}"
+                );
+                assert_eq!(issue.evidence, "疑似凭据已隐藏", "{path} in {id}");
+                current.push(issue.fingerprint.clone());
+            }
+        }
+        assert!(
+            !serde_json::to_string(&issues)
+                .unwrap()
+                .contains("fixture-only-value")
+        );
+        if fingerprints.is_empty() {
+            fingerprints = current;
+        } else {
+            assert_eq!(fingerprints, current);
+        }
+    }
+}
+
+#[test]
 fn repeated_scan_preserves_findings_with_distinct_ids_and_actual_coverage() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.0.join("gEnErAtEd")).unwrap();
@@ -136,6 +394,7 @@ fn repeated_scan_preserves_findings_with_distinct_ids_and_actual_coverage() {
         run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
         let summary = get_scan_state(&state, id).unwrap();
         assert_eq!(summary.run.status, ScanStatus::Completed);
+        assert!(summary.run.failure_message.is_none());
         assert_eq!(summary.run.total_files, 1);
         assert_eq!(summary.run.scanned_files, 1);
         assert_eq!(
@@ -202,10 +461,9 @@ fn paused_rules_can_be_canceled_and_terminal_status_cannot_be_overwritten() {
     );
     cancel_scan_state(&state, "active").unwrap();
     assert!(worker.join().unwrap().is_err());
-    assert_eq!(
-        get_scan_state(&state, "active").unwrap().run.status,
-        ScanStatus::Canceled
-    );
+    let canceled = get_scan_state(&state, "active").unwrap().run;
+    assert_eq!(canceled.status, ScanStatus::Canceled);
+    assert!(canceled.failure_message.is_none());
     pause_scan_state(&state, "active").unwrap();
     cancel_scan_state(&state, "active").unwrap();
     assert_eq!(
@@ -296,16 +554,18 @@ fn restart_recovers_interrupted_runs_and_preserves_their_settings() {
     {
         let state = AppState::open(db_path).unwrap();
         register_project(&state, &fixture.0);
-        state
-            .storage()
-            .unwrap()
-            .create_scan_run(&run_record("running", ScanStatus::Running))
-            .unwrap();
-        state
-            .storage()
-            .unwrap()
-            .create_scan_run(&run_record("canceling", ScanStatus::Canceling))
-            .unwrap();
+        for (id, status) in [
+            ("running", ScanStatus::Running),
+            ("queued", ScanStatus::Queued),
+            ("paused", ScanStatus::Paused),
+            ("canceling", ScanStatus::Canceling),
+            ("completed", ScanStatus::Completed),
+        ] {
+            let mut run = run_record(id, status);
+            run.config["enabledAnalyzers"] = json!(["ruff"]);
+            run.config["excludedDirectories"] = json!(["Generated"]);
+            state.storage().unwrap().create_scan_run(&run).unwrap();
+        }
         let root = state.scan_work_root.as_ref().unwrap();
         abandoned = root.join(new_run_id(1));
         unrelated = root.join("unrelated");
@@ -318,14 +578,36 @@ fn restart_recovers_interrupted_runs_and_preserves_their_settings() {
         );
     }
     let reopened = AppState::open(db_path).unwrap();
-    let failed = get_scan_state(&reopened, "running").unwrap();
-    assert_eq!(failed.run.status, ScanStatus::Failed);
-    assert_eq!(failed.run.config["maxLineLength"], json!(80));
-    assert_eq!(failed.run.config["interrupted"], json!(true));
-    assert_eq!(
-        get_scan_state(&reopened, "canceling").unwrap().run.status,
-        ScanStatus::Canceled
-    );
+    let recovery_message = "scan was interrupted before completion; the original failure reason is unavailable. Please retry the scan.";
+    for id in ["running", "queued", "paused"] {
+        let failed = get_scan_state(&reopened, id).unwrap();
+        assert_eq!(failed.run.status, ScanStatus::Failed);
+        assert_eq!(
+            failed.run.failure_message.as_deref(),
+            Some(recovery_message)
+        );
+        assert!(failed.run.completed_at.is_some());
+        assert_eq!(failed.run.config["maxLineLength"], json!(80));
+        assert_eq!(failed.run.config["enabledAnalyzers"], json!(["ruff"]));
+        assert_eq!(
+            failed.run.config["excludedDirectories"],
+            json!(["Generated"])
+        );
+        assert_eq!(failed.run.config["interrupted"], json!(true));
+    }
+    let canceled = get_scan_state(&reopened, "canceling").unwrap().run;
+    assert_eq!(canceled.status, ScanStatus::Canceled);
+    assert!(canceled.failure_message.is_none());
+    let completed = get_scan_state(&reopened, "completed").unwrap().run;
+    assert_eq!(completed.status, ScanStatus::Completed);
+    assert!(completed.failure_message.is_none());
     assert!(!abandoned.exists());
     assert!(unrelated.exists());
+    let recovered = get_scan_state(&reopened, "running").unwrap().run;
+    drop(reopened);
+    let reopened_again = AppState::open(db_path).unwrap();
+    assert_eq!(
+        get_scan_state(&reopened_again, "running").unwrap().run,
+        recovered
+    );
 }

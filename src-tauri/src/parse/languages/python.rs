@@ -1,8 +1,8 @@
 //! Python grammar facts (tree-sitter-python).
 
-use super::common::clamp_text;
+use super::common::{LineIndex, clamp_text};
 use super::{LangSpec, Node, field_text};
-use crate::parse::{ImportBinding, ImportInfo};
+use crate::parse::{ImportBinding, ImportInfo, SourceRange};
 
 fn string_content(node: Node, text: &str) -> Option<String> {
     let bytes = text.as_bytes();
@@ -17,12 +17,20 @@ fn string_content(node: Node, text: &str) -> Option<String> {
 
 fn python_imports(node: Node, text: &str) -> Vec<ImportInfo> {
     let bytes = text.as_bytes();
+    let index = LineIndex::new(text);
     let mut out = Vec::new();
-    let mk = |module: &str, names: Vec<ImportBinding>, dynamic: bool| ImportInfo {
-        module: module.to_owned(),
-        names,
-        range: Default::default(),
-        dynamic,
+    let mk = |module: &str,
+              names: Vec<ImportBinding>,
+              binding_range: Option<SourceRange>,
+              dynamic: bool|
+     -> ImportInfo {
+        ImportInfo {
+            module: module.to_owned(),
+            names,
+            range: Default::default(),
+            binding_range,
+            dynamic,
+        }
     };
     match node.kind() {
         "import_statement" => {
@@ -31,7 +39,12 @@ fn python_imports(node: Node, text: &str) -> Vec<ImportInfo> {
                 match child.kind() {
                     "dotted_name" => {
                         let module = child.utf8_text(bytes).unwrap_or("");
-                        out.push(mk(module, vec![], false));
+                        out.push(mk(
+                            module,
+                            vec![],
+                            Some(range_of_binding(child, &index)),
+                            false,
+                        ));
                     }
                     "aliased_import" => {
                         let module = field_text(child, "name", text);
@@ -44,7 +57,12 @@ fn python_imports(node: Node, text: &str) -> Vec<ImportInfo> {
                                 alias: Some(alias),
                             }]
                         };
-                        out.push(mk(&module, names, false));
+                        out.push(mk(
+                            &module,
+                            names,
+                            Some(range_of_binding(child, &index)),
+                            false,
+                        ));
                     }
                     _ => {}
                 }
@@ -77,7 +95,7 @@ fn python_imports(node: Node, text: &str) -> Vec<ImportInfo> {
                     _ => {}
                 }
             }
-            out.push(mk(&module, names, false));
+            out.push(mk(&module, names, None, false));
         }
         "call_expression" => {
             let callee = field_text(node, "function", text);
@@ -90,12 +108,26 @@ fn python_imports(node: Node, text: &str) -> Vec<ImportInfo> {
                     .and_then(|s| string_content(s, text))
                     .map(|m| clamp_text(&m, 200))
                     .unwrap_or_else(|| "<dynamic>".to_owned());
-                out.push(mk(&module, vec![], true));
+                out.push(mk(&module, vec![], None, true));
             }
         }
         _ => {}
     }
     out
+}
+
+fn range_of_binding(node: Node, index: &LineIndex) -> SourceRange {
+    let range = node.byte_range();
+    let (start_line, start_column) = index.line_col(range.start);
+    let (end_line, end_column) = index.line_col(range.end);
+    SourceRange {
+        start_line,
+        start_column,
+        end_line,
+        end_column,
+        start_byte: range.start,
+        end_byte: range.end,
+    }
 }
 
 fn python_bases(node: Node, text: &str) -> Vec<String> {

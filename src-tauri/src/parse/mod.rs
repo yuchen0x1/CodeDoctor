@@ -86,6 +86,8 @@ pub struct FunctionInfo {
     pub range: SourceRange,
     pub body_range: Option<SourceRange>,
     pub parameters: Vec<String>,
+    #[serde(default)]
+    pub parameter_ranges: Vec<SourceRange>,
     pub metrics: metrics::FunctionMetrics,
     pub parent_class: Option<String>,
     pub is_exported: bool,
@@ -114,6 +116,8 @@ pub struct ImportInfo {
     pub module: String,
     pub names: Vec<ImportBinding>,
     pub range: SourceRange,
+    #[serde(default)]
+    pub binding_range: Option<SourceRange>,
     pub dynamic: bool,
 }
 

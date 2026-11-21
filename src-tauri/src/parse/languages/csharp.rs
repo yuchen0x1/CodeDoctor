@@ -36,6 +36,7 @@ fn csharp_imports(node: Node, text: &str) -> Vec<ImportInfo> {
         module,
         names,
         range: Default::default(),
+        binding_range: None,
         dynamic: false,
     }]
 }

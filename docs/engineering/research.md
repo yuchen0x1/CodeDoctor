@@ -124,3 +124,64 @@
 | 33 | 集中托管服务 | SonarQube | D / 高 | 改变隐私边界 |
 
 平台适配见 [平台评估](platforms.md)。按 [维护流程](maintenance.md) 的周期复查版本、社区问题和许可证。上述第三方代码均作为参考。
+
+## 2026-11-21 SARIF 与本地 CI 工作流复核
+
+本次另行核读以下公开仓库的 README、许可证及相关实现；只借鉴架构与互操作思路，不复制代码。没有安装或基准测试第三方工具。性能、Windows 适配与 CodeDoctor 报告在各消费端的呈现均未实测。
+
+| 项目与许可证 | 核验的设计 | 对 CodeDoctor 的启发 |
+| --- | --- | --- |
+| [semgrep/semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | [扫描入口](https://github.com/semgrep/semgrep/blob/cd3b439c36f43a299dffcd1e7544f6ce7ebb03cc/cli/src/semgrep/commands/scan.py)、本地机器报告与[基线比较](https://github.com/semgrep/semgrep/blob/cd3b439c36f43a299dffcd1e7544f6ce7ebb03cc/cli/src/semgrep/run_scan.py) | 门禁失败必须区别于分析执行失败；显式报告状态，不把失败的基线比较说成“没有新增发现”。 |
+| [biomejs/biome](https://github.com/biomejs/biome) · MIT / Apache-2.0 | [共享 workspace API](https://github.com/biomejs/biome/blob/73125bdb0326e211b796f1bf893e844609dc6b70/crates/biome_service/src/workspace.rs)，分离项目、诊断与代码操作 | 桌面和 CLI 继续复用同一 Rust 报告引擎；先测解析成本，再考虑增量缓存，不加常驻服务。 |
+| [trunk-io/plugins](https://github.com/trunk-io/plugins) · MIT | [Ruff 插件描述](https://github.com/trunk-io/plugins/blob/581fae83afe3b48e62faf1e35c89757d115efbb1/linters/ruff/plugin.yaml)声名版本、文件类型、命令和输出格式 | 扩展能力需显式约束版本和输入；不自动下载、执行项目钩子或接入任意命令。Trunk CLI 仓库本次未成功核验，未将插件仓许可证误作 CLI 许可证。 |
+| [SonarSource/sonarqube](https://github.com/SonarSource/sonarqube) · LGPL-3.0 | [质量门禁求值](https://github.com/SonarSource/sonarqube/blob/457cee5aabea2e1eabb151afb33f6c65a6e02e69/server/sonar-server-common/src/main/java/org/sonar/server/qualitygate/QualityGateEvaluatorImpl.java)和分析缓存 | 明确门禁条件和比较基线；保留 CodeDoctor 本地数据边界，不引入服务端。 |
+| [reviewdog/reviewdog](https://github.com/reviewdog/reviewdog) · MIT | [SARIF 解析](https://github.com/reviewdog/reviewdog/blob/f42d2a2763b3fee771905bdfe1b71269844c21e1/parser/sarif.go)及[变更行过滤](https://github.com/reviewdog/reviewdog/blob/f42d2a2763b3fee771905bdfe1b71269844c21e1/filter/filter.go) | 过滤展示范围不等于扫描基线；本次使用 OASIS schema 做验证，未声称已在 reviewdog 或 GitHub 实测呈现。 |
+| [Microsoft SARIF Tutorials](https://github.com/microsoft/sarif-tutorials) · 文档 CC BY-4.0、代码 MIT | [SARIF 字段样例](https://github.com/microsoft/sarif-tutorials/tree/819b0f62f47ecde9a8f24dfc387c41926f5edabe/samples)与[工具说明](https://github.com/microsoft/sarif-tutorials/blob/819b0f62f47ecde9a8f24dfc387c41926f5edabe/docs/Multitool.md) | 对照 OASIS 2.1.0 schema 验证报告；优先给出规则引用和可靠文件位置，不默认嵌入源码。 |
+| [Ericsson/codechecker](https://github.com/Ericsson/codechecker) · Apache-2.0 | [架构](https://github.com/Ericsson/codechecker/blob/53222cd5d7566c553d8d7edbb5134a35a56ef15e/docs/architecture.md)区分分析器、报告转换和可选 Web 服务 | 先支持安全的报告互操作；导入目录/ZIP 不触发构建或执行外部代码。 |
+
+上述比较支持本次的低依赖改进：SARIF 结果引用去重的规则表、区分分析执行状态与门禁退出码，并避免输出猜测的位置；文件保存对话框只在其异步选择期间锁定对应表单。下一步应以真实消费端验证行级注释与跨扫描去重，再评估是否增加 SARIF 上传或新增问题基线门禁。
+
+## 2026-11-21 桌面扫描器与报告生态复核
+
+本次复核了下列公开项目的 README、相关实现和许可证声明，只借鉴方案，不复制代码或新增运行时依赖。社区活动仅用于判断维护状态，不代表性能对比；仓库许可证也不覆盖所有规则集和传递依赖。
+
+| 参考项目与许可证 | 已核验的做法 | 可借鉴方向与边界 |
+| --- | --- | --- |
+| [semgrep/semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | [CLI 文档](https://docs.semgrep.dev/cli-reference)包含机器报告、超时、并发和内存控制；架构区分 Python CLI 与 OCaml 分析引擎。 | 将诊断与工具执行状态分开；本地分析不等于完全离线，网络遥测、规则获取需独立核实。 |
+| [oxsecurity/megalinter](https://github.com/oxsecurity/megalinter) · AGPL-3.0 | [插件描述](https://github.com/oxsecurity/megalinter/blob/main/docs/plugins.md)及超时、分组和报告配置集中描述多工具集成；SARIF 仅聚合支持它的工具。 | 为适配器明确工具版本、覆盖和失败状态；插件/命令会扩大执行信任边界，不宜照搬至导入项目。 |
+| [golangci/golangci-lint](https://github.com/golangci/golangci-lint) · GPL-3.0 | [架构文档](https://golangci-lint.run/docs/contributing/architecture/)分离运行、过滤、去重和输出阶段。 | 保持分析、归一化和展示分层；其共享 Go 类型信息优化不可直接推断适用于 Tree-sitter 多语言管线。 |
+| [microsoft/sarif-vscode-extension](https://github.com/microsoft/sarif-vscode-extension) · MIT | [查看器](https://github.com/microsoft/sarif-vscode-extension/blob/main/README.md)提供可筛选结果、详情、键盘导航和源码位置对接。 | 继续优先完善结果筛选与定位；这是 SARIF 阅读器，不是扫描引擎或历史数据库。 |
+| [SonarSource/sonarqube](https://github.com/SonarSource/sonarqube) · LGPL-3.0 | [问题生命周期](https://docs.sonarsource.com/sonarqube-community-build/user-guide/issues/solution-overview)及[历史维护](https://docs.sonarsource.com/sonarqube-community-build/project-administration/maintaining-project/managing-project-history)区分持久问题状态和分析快照。 | 可研究保留期及问题状态语义；本地 SQLite 产品无需引入其服务端架构或商业版能力。 |
+| [tauri-apps/plugins-workspace](https://github.com/tauri-apps/plugins-workspace) · Apache-2.0 OR MIT | [SQL 插件文档](https://v2.tauri.app/plugin/sql/)采用版本化迁移和受限权限。 | 本项目继续由窄 Rust 命令访问 SQLite，不开放前端任意 SQL；插件许可与 API 不代表加密或沙箱能力。 |
+
+另看了 [Bearer](https://github.com/Bearer/bearer)：其源码标注 Elastic License 2.0（并非宽松开源许可证）；基线报告、指纹忽略和 JSON/SARIF/HTML 输出可供交互设计参考，但不在本次开放源码许可项目统计中。所有许可证均为仓库/版本层面的初步核验，集成前仍应审查具体组件、规则和传递依赖。
+
+本轮综合结论：离线扫描项目应明确分析完整性、工具失败和中断状态；保留诊断时应有长度/控制字符边界，避免路径和源码内容流入共享报告；大量本地源文件的总资源限制需先实测再设计。安全和性能观察是后续候选，不把未复现的影响描述成已发生缺陷。
+
+## 2026-11-21 凭据预览与报告证据边界复核
+
+本次实际通过 GitHub API 重读以下五仓库的 README、许可证及所列实现/文档，核对未归档状态；没有安装这些工具、运行第三方性能基准或复制代码。功能说明与本项目的实际源码审查对照，不把工具自身的性能宣传视作 CodeDoctor 的测量结果。
+
+| 仓库与已核验许可 | 功能、架构与交互 | 数据、安全和扩展边界 | CodeDoctor 对照与本轮决定 |
+| --- | --- | --- | --- |
+| [Gitleaks](https://github.com/gitleaks/gitleaks) · MIT | Go CLI 面向 Git、目录和 stdin 的凭据扫描，支持报告；本次 README 明确功能冻结、以后以安全补丁为主，不能称为持续新增功能。 | [Finding.Redact](https://github.com/gitleaks/gitleaks/blob/master/report/finding.go)同步替换 Line、Match 和 Secret；CLI 源码许可不能代替 GitHub Action 的独立许可条件。 | 本项目不仅有源码预览，还有规则证据、缓存和历史报告；只隐藏一个视图不够。采用同一敏感行分类，在证据进入缓存前处理。 |
+| [Ruff](https://github.com/astral-sh/ruff) · MIT | Rust Python 检查/格式化与编辑器集成；[配置文档](https://github.com/astral-sh/ruff/blob/main/docs/configuration.md)说明层级配置及 `--isolated`。 | `--isolated` 忽略配置；格式化/修复属于另一类写操作。可复用诊断格式，不等于允许执行项目脚本。 | 保留现有可选 Ruff 的隔离只读入口，不为本次安全修复引入新工具或依赖。 |
+| [Semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | 规则扫描引擎与 Python CLI，机器格式化与引擎分层；[SARIF formatter](https://github.com/semgrep/semgrep/blob/develop/cli/src/semgrep/formatter/sarif.py)从结构化诊断生成输出。 | README 区分社区引擎与专有规则/能力；远程规则配置和指标上报的网络行为需单独核查。 | 保持本机分析、诊断与渲染分离；不把标准 SARIF 当作其它报告已完成脱敏的证明。没有复制 LGPL 实现或引入联网规则。 |
+| [Biome](https://github.com/biomejs/biome) · MIT OR Apache-2.0 | Rust Web 工具链，CLI/编辑器使用共享诊断服务；[Workspace](https://github.com/biomejs/biome/blob/main/crates/biome_service/src/workspace.rs)明确线程安全、打开文档与缓存生命周期。 | 共享引擎减少不同客户端的行为漂移；缓存必须随语义失效。它并非 SQLite 历史审阅桌面应用。 | 将预览与逐文件规则证据的分类提取为共享小模块；规则版本升至 `rules-4`，不复用旧脱敏语义缓存。 |
+| [Trivy](https://github.com/aquasecurity/trivy) · Apache-2.0 | Go CLI 聚合漏洞、配置、许可和凭据检测；[Secret Scanning](https://github.com/aquasecurity/trivy/blob/main/docs/guide/scanner/secret.md)列出规则、允许路径及遮蔽输出示例。 | 凭据覆盖由规则与排除边界决定；未命中不代表不存在凭据，漏洞数据库等网络需求不等于本地扫描。 | 凭据遮蔽仍明示为保守启发式；不把新的敏感行判断包装为全量 DLP，不新增大型扫描依赖。 |
+
+这些项目主要提供 CLI 或编辑器诊断；本次没有对其 GUI、安装器、资源占用或实际扫描速度作实测比较。CodeDoctor 保留 Windows 十工作区、SQLite 历史、离线目录/ZIP 与 Linux CLI 的定位，不引入中央服务。新增回归覆盖带类型注解的多行值，以及规则→缓存→数据库→五种报告的完整证据通路；历史记录与已导出的文件不被自动改写，分享前仍需检查。
+
+## 2026-11-21 发布收敛：缓存身份与字面报告
+
+本次在 00:07–00:18 UTC 通过 GitHub API 实际重读下列五个仓库的 README、许可证和所列实现；五仓均未归档。这里只记录相对前述研究新增的具体证据，不把推送日期等同于发布日期，不复制第三方代码，不声称实测过其界面或性能。
+
+| 项目及本次核验许可 | 具体实现证据 | CodeDoctor 对照与决定 |
+| --- | --- | --- |
+| [Semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | [OCaml SARIF 输出](https://github.com/semgrep/semgrep/blob/develop/src/osemgrep/reporting/Sarif_output.ml)会写入源码 snippet；[metrics 说明](https://github.com/semgrep/semgrep/blob/develop/metrics.md)区分配置与遥测。 | 本地执行不保证导出无源码；继续对整条 Issue、缓存和五格式报告断言无合成凭据，不仅检查 evidence。 |
+| [Biome](https://github.com/biomejs/biome) · MIT OR Apache-2.0 | [Workspace](https://github.com/biomejs/biome/blob/main/crates/biome_service/src/workspace.rs)统一客户端 API，并描述 AST/诊断缓存生命周期。 | 维持 Rust 核心与薄界面；参数定位由解析器统一提供，复合文件坐标同样映射回原文，保留旧序列化结果兼容性。 |
+| [Ruff](https://github.com/astral-sh/ruff) · MIT，含第三方声明 | [缓存](https://github.com/astral-sh/ruff/blob/main/crates/ruff/src/cache.rs)隔离版本、项目与配置；所读文件缓存键包含 mtime/权限，缓存状态为 linted/formatted，而非任意诊断全文。 | 借鉴语义版本失效，不照搬 mtime 为内容一致性保证；保留本项目内容哈希与完整配置键，规则语义升为 `rules-5`。 |
+| [reviewdog](https://github.com/reviewdog/reviewdog) · MIT | [SARIF parser](https://github.com/reviewdog/reviewdog/blob/master/parser/sarif.go)优先 Markdown message、保留原始结果；[diff filter](https://github.com/reviewdog/reviewdog/blob/master/filter/diff_filter.go)只控制呈现范围。 | 互操作格式不是净化器，展示过滤也不是增量分析正确性；对 Markdown 字段和多行证据分别处理上下文。 |
+| [SonarQube](https://github.com/SonarSource/sonarqube) · 根 LGPL v3；所读 Java 文件 LGPL-3.0-or-later | [报告提交](https://github.com/SonarSource/sonarqube/blob/master/server/sonar-webserver-webapi/src/main/java/org/sonar/server/ce/ws/SubmitAction.java)进入异步任务并检查分析权限；[缓存持久化](https://github.com/SonarSource/sonarqube/blob/master/server/sonar-ce-task-projectanalysis/src/main/java/org/sonar/ce/task/projectanalysis/step/PersistScannerAnalysisCacheStep.java)按分支事务替换。 | 保留本地 SQLite 阶段事务；在落库前确保最终指纹唯一、真实位置不同的发现不被吞并。不引入服务端，也不外推商业产品或分析器的许可。 |
+
+报告渲染另对照 [CommonMark 0.31.2 官方规范](https://github.com/commonmark/commonmark-spec/blob/0.31.2/spec.txt)：段落不能跨空行，行内代码将换行归一为空格；普通字段可转义 ASCII 标点，原始 HTML 默认不转义，多行证据宜使用独立围栏。采用超过证据中最长反引号串的围栏，并用 MIT 许可的 `pulldown-cmark` 0.13.6 在测试中实际解析事件，断言不可信文本没有生成 HTML、链接或图片。该依赖仅用于开发测试，未新增发行运行时依赖。下游查看器的非标准扩展、清洗和网络设置仍需单独审查。

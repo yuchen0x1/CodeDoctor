@@ -5,9 +5,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Keep the group fixed across tags so two versions cannot promote latest concurrently.
 concurrency:
-  group: release-${{ github.ref }}
+  group: codedoctor-release
   cancel-in-progress: false
+  queue: max
 jobs:
   verify:
     uses: ./.github/workflows/ci.yml
@@ -19,6 +21,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Test release publication guards
+        run: node --test scripts/release/publish.test.mjs
       - if: github.ref_type == 'tag'
         env:
           RELEASE_TAG: ${{ github.ref_name }}

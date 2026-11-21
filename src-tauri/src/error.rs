@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::error::AppError;
+    use crate::error::{AppError, scan_failure_message};
     use std::io::ErrorKind;
 
     #[test]
@@ -23,6 +23,18 @@ mod tests {
 
         assert_eq!(app_error.to_string(), "local storage operation failed");
         assert!(!app_error.to_string().contains("hidden"));
+    }
+
+    #[test]
+    fn persistent_failure_text_is_single_line_bounded_and_unicode_safe() {
+        let message =
+            scan_failure_message(&format!("\0\t失败\r\n\u{0085}\u{2028}{}", "错".repeat(600)));
+        assert!(!message.chars().any(char::is_control));
+        assert!(!message.contains(['\n', '\r', '\u{2028}']));
+        assert!(message.chars().count() <= 512);
+        assert!(message.starts_with("失败"));
+        assert_eq!(scan_failure_message(&"错".repeat(600)).chars().count(), 512);
+        assert_eq!(scan_failure_message("\0\t\r\n"), "scan failed");
     }
 }
 use serde::Serialize;
@@ -52,6 +64,29 @@ impl fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+/// Bound already-safe AppError display text for persistent scan diagnostics.
+/// This is not a redactor: callers must never pass raw OS/tool/database errors.
+/// The limit counts Unicode scalar values, not UTF-8 bytes.
+pub(crate) fn scan_failure_message(message: &str) -> String {
+    let message: String = message
+        .chars()
+        .map(|character| {
+            if character.is_control() || character.is_whitespace() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(512)
+        .collect();
+    let message = message.trim();
+    if message.is_empty() {
+        "scan failed".to_owned()
+    } else {
+        message.to_owned()
+    }
+}
 
 impl From<std::io::Error> for AppError {
     fn from(error: std::io::Error) -> Self {

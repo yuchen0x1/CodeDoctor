@@ -316,6 +316,7 @@ mod tests {
                         status,
                         started_at: None,
                         completed_at: None,
+                        failure_message: None,
                         config: serde_json::json!({}),
                         rule_version: rules.into(),
                         analyzer_versions: serde_json::json!({}),

@@ -3,7 +3,8 @@
 use crate::domain::types::{FileRecord, ScanStatus};
 use crate::error::AppError;
 use crate::index::{MAX_SOURCE_FILE_BYTES, encoding::decode_bytes};
-use crate::rules::security::{HARDCODED_SECRET_RULE_ID, may_expose_credential};
+use crate::rules::security::HARDCODED_SECRET_RULE_ID;
+use crate::rules::source_redaction::{is_credential_path, sensitive_source_lines};
 use crate::state::AppState;
 use crate::storage::IssueLocation;
 use serde::Serialize;
@@ -239,41 +240,20 @@ impl IssueSource {
     fn source_lines<'a>(&'a self, text: &'a str) -> impl Iterator<Item = (&'a str, bool)> {
         let credential_file = is_credential_path(&self.location.file_path);
         let marked_secret = self.location.rule_id == HARDCODED_SECRET_RULE_ID;
-        let mut inside_private_key = false;
-        text.lines().enumerate().map(move |(index, line)| {
-            if line.contains("-----BEGIN ") && line.contains("PRIVATE KEY-----") {
-                inside_private_key = true;
-            }
-            let line_no = index as u32 + 1;
-            let sensitive = credential_file
-                || inside_private_key
-                || (marked_secret
-                    && (self.location.start_line..=self.location.end_line).contains(&line_no))
-                || may_expose_credential(line);
-            if line.contains("-----END ") && line.contains("PRIVATE KEY-----") {
-                inside_private_key = false;
-            }
-            (line, sensitive)
-        })
+        sensitive_source_lines(text, &self.file.language)
+            .enumerate()
+            .map(move |(index, (line, sensitive))| {
+                let line_no = index as u32 + 1;
+                (
+                    line,
+                    credential_file
+                        || sensitive
+                        || (marked_secret
+                            && (self.location.start_line..=self.location.end_line)
+                                .contains(&line_no)),
+                )
+            })
     }
-}
-
-fn is_credential_path(relative: &str) -> bool {
-    let name = relative
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    name == ".env"
-        || name.starts_with(".env.")
-        || matches!(
-            name.as_str(),
-            ".npmrc" | ".netrc" | "credentials" | "id_rsa" | "id_ed25519"
-        )
-        || Path::new(&name)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext, "pem" | "key" | "p12" | "pfx"))
 }
 
 fn invalid_source_path() -> AppError {

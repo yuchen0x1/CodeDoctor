@@ -137,6 +137,8 @@ export default function App() {
   const [path, setPath] = useState("");
   const [reportFormat, setReportFormat] = useState<ReportFormat>("markdown");
   const [reportDestination, setReportDestination] = useState("");
+  const [reportPathPending, setReportPathPending] = useState(false);
+  const reportPathPendingRef = useRef(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -418,6 +420,7 @@ export default function App() {
   };
 
   const exportCurrentReport = async () => {
+    if (reportPathPendingRef.current) return;
     const exportRunId = reportRunId || run?.run.id;
     if (!exportRunId || !reportDestination.trim()) { setError("请选择扫描快照并填写报告目标路径。"); return; }
     setBusy(true); setError("");
@@ -457,10 +460,16 @@ export default function App() {
   };
 
   const chooseReportPath = async () => {
+    if (reportPathPendingRef.current) return;
+    const request = projectRequest.current;
+    const current = () => projectRequest.current === request;
+    reportPathPendingRef.current = true;
+    setReportPathPending(true);
     try {
       const selectedPath = await pickReportDestination(reportFormat);
-      if (selectedPath) setReportDestination(selectedPath);
-    } catch (reason) { setError(safeError(reason)); }
+      if (current() && selectedPath) setReportDestination(selectedPath);
+    } catch (reason) { if (current()) setError(safeError(reason)); }
+    finally { reportPathPendingRef.current = false; setReportPathPending(false); }
   };
 
   useEffect(() => {
@@ -523,8 +532,8 @@ export default function App() {
         onCopy={copyPrompt} onExport={savePrompt} />}
       {page === "history" && <History project={project} runs={historyRuns} baseRunId={baseRunId} targetRunId={targetRunId} reportRunId={reportRunId}
         setBaseRunId={(value) => { historyRequest.current += 1; setBaseRunId(value); setHistoryDiff(null); }} setTargetRunId={(value) => { historyRequest.current += 1; setTargetRunId(value); setHistoryDiff(null); }}
-        setReportRunId={setReportRunId} diff={historyDiff?.baseRunId === baseRunId && historyDiff.targetRunId === targetRunId ? historyDiff : null} issueDetails={historyIssueDetails} busy={busy} onCompare={compareHistory} format={reportFormat}
-        setFormat={(value) => { setReportFormat(value); setReportDestination(""); }} destination={reportDestination} setDestination={setReportDestination} onChooseDestination={chooseReportPath} onExport={exportCurrentReport} />}
+        setReportRunId={(value) => { if (!reportPathPendingRef.current) setReportRunId(value); }} diff={historyDiff?.baseRunId === baseRunId && historyDiff.targetRunId === targetRunId ? historyDiff : null} issueDetails={historyIssueDetails} busy={busy} reportPathPending={reportPathPending} onCompare={compareHistory} format={reportFormat}
+        setFormat={(value) => { if (reportPathPendingRef.current) return; setReportFormat(value); setReportDestination(""); }} destination={reportDestination} setDestination={(value) => { if (!reportPathPendingRef.current) setReportDestination(value); }} onChooseDestination={chooseReportPath} onExport={exportCurrentReport} />}
       {page === "settings" && <SettingsView settings={settings} onSave={(next: AppSettings) => {
         writeSettings(next);
         setSettings(next);
@@ -673,15 +682,20 @@ function Scans({ run, event, status, analyzers, canRetry, onPause, onResume, onC
   const progress = status === "completed" ? 100 : total ? Math.min(100, Math.round(processed / total * 100)) : 0;
   const canPause = status === "running" || status === "paused";
   const canCancel = scanActive(status) && status !== "canceling";
+  const failureMessage = status === "failed"
+    ? run?.run.failureMessage || (event?.status === "failed" ? event.message : null)
+      || "扫描失败。此任务未记录详细原因，请按原设置重新扫描。"
+    : null;
   const analyzerLabels: Record<AnalyzerRun["status"], string> = {
     available: "可用", executed: "已运行", failed: "运行失败", skipped: "已跳过", unavailable: "不可用",
   };
   return <div className="page-stack">
     <section className="panel dashboard-detail">
       <div className="section-heading">
-        <div><h2>{run ? "扫描 " + run.run.id.slice(-12) : "等待扫描任务"}</h2>{event?.message && <p className="muted">{event.message}</p>}</div>
+        <div><h2>{run ? "扫描 " + run.run.id.slice(-12) : "等待扫描任务"}</h2>{!failureMessage && event?.message && <p className="muted">{event.message}</p>}</div>
         {run && <span className="pill pill--cyan">{scanStatusLabels[status]}</span>}
       </div>
+      {failureMessage && <p className="alert alert--error" role="alert">{failureMessage}</p>}
       {run ? <>
         <div className="progress-meta">
           <strong>{status === "completed" ? "结果已保存" : stageNames[event?.stage || ""] || scanStatusLabels[status]}</strong>
@@ -774,7 +788,7 @@ function Prompts({ run, issues, findingsState, prompt, mode, setMode, baseline, 
   </section>;
 }
 
-function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRunId, setTargetRunId, setReportRunId, diff, issueDetails, busy, onCompare, format, setFormat, destination, setDestination, onChooseDestination, onExport }: {
+function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRunId, setTargetRunId, setReportRunId, diff, issueDetails, busy, reportPathPending, onCompare, format, setFormat, destination, setDestination, onChooseDestination, onExport }: {
   project: ProjectSummary | null;
   runs: ScanRun[];
   baseRunId: string;
@@ -786,6 +800,7 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
   diff: HistoryDiff | null;
   issueDetails: Record<string, Issue>;
   busy: boolean;
+  reportPathPending: boolean;
   onCompare: () => void;
   format: ReportFormat;
   setFormat: (value: ReportFormat) => void;
@@ -795,6 +810,7 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
   onExport: () => void;
 }) {
   const completedRuns = runs.filter(completed);
+  const reportBusy = busy || reportPathPending;
   const changeLabels: Record<HistoryDiff["issueChanges"][number]["kind"], string> = { added: "新增", resolved: "已解决", persistent: "持续存在", severityChanged: "严重度变化", locationChanged: "位置变化" };
   return <section className="panel panel--large dashboard-detail">
     {project ? <>
@@ -835,15 +851,15 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
       <div className="report-export">
         <h3>导出报告</h3>
         <div className="history-controls">
-          <select aria-label="报告快照" value={reportRunId} disabled={busy} onChange={(event) => setReportRunId(event.target.value)}>
+          <select aria-label="报告快照" value={reportRunId} disabled={reportBusy} onChange={(event) => setReportRunId(event.target.value)}>
             <option value="">选择报告快照</option>{completedRuns.map((item) => <option key={item.id} value={item.id}>{scanLabel(item)}</option>)}
           </select>
-          <select aria-label="报告格式" value={format} disabled={busy} onChange={(event) => setFormat(event.target.value as ReportFormat)}>
+          <select aria-label="报告格式" value={format} disabled={reportBusy} onChange={(event) => setFormat(event.target.value as ReportFormat)}>
             <option value="json">JSON</option><option value="markdown">Markdown</option><option value="txt">TXT</option><option value="html">HTML</option><option value="sarif">SARIF</option>
           </select>
-          <input aria-label="报告保存路径" value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="报告保存路径" />
-          <button className="button button--quiet" disabled={busy || !reportRunId} onClick={onChooseDestination}>选择保存位置</button>
-          <button className="button button--primary" disabled={!reportRunId || !destination.trim() || busy} onClick={onExport}>导出报告</button>
+          <input aria-label="报告保存路径" value={destination} disabled={reportPathPending} onChange={(event) => setDestination(event.target.value)} placeholder="报告保存路径" />
+          <button className="button button--quiet" disabled={reportBusy || !reportRunId} onClick={onChooseDestination}>选择保存位置</button>
+          <button className="button button--primary" disabled={!reportRunId || !destination.trim() || reportBusy} onClick={onExport}>导出报告</button>
         </div>
       </div>
     </> : <Empty title="还没有项目历史" text="导入项目并完成扫描后即可比较和导出快照。" />}

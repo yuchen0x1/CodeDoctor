@@ -9,6 +9,7 @@ pub mod config;
 mod local_quality;
 pub mod runner;
 pub mod security;
+pub(crate) mod source_redaction;
 
 #[cfg(test)]
 mod fixture_tests;
@@ -114,7 +115,11 @@ impl IssueDraft {
 
     pub fn columns(mut self, start: u32, end: u32) -> Self {
         self.start_column = start.max(1);
-        self.end_column = end.max(self.start_column);
+        self.end_column = if self.start_line == self.end_line {
+            end.max(self.start_column)
+        } else {
+            end.max(1)
+        };
         self
     }
 }
@@ -229,6 +234,16 @@ mod tests {
         assert_eq!(a.id, b.id);
         assert!(a.id.starts_with("rule-"));
         assert_eq!(a.source, "codedoctor");
+    }
+
+    #[test]
+    fn columns_preserve_earlier_end_column_on_later_line() {
+        let make = |end_line| IssueDraft::new("test", "test", Severity::Low, 1, end_line);
+        let multiline = make(3).columns(23, 2);
+        assert_eq!((multiline.start_column, multiline.end_column), (23, 2));
+        assert_eq!(make(3).columns(23, 0).end_column, 1);
+        assert_eq!(make(1).columns(23, 2).end_column, 23);
+        assert_eq!(make(1).columns(0, 0).start_column, 1);
     }
 
     #[test]
