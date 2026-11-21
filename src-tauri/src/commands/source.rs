@@ -240,7 +240,7 @@ impl IssueSource {
     fn source_lines<'a>(&'a self, text: &'a str) -> impl Iterator<Item = (&'a str, bool)> {
         let credential_file = is_credential_path(&self.location.file_path);
         let marked_secret = self.location.rule_id == HARDCODED_SECRET_RULE_ID;
-        sensitive_source_lines(text)
+        sensitive_source_lines(text, &self.file.language)
             .enumerate()
             .map(move |(index, (line, sensitive))| {
                 let line_no = index as u32 + 1;

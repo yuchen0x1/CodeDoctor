@@ -4,6 +4,31 @@ use std::fmt::Write;
 
 use super::{quality_score, summary_lines};
 
+fn escape_markdown(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\r' => out.push_str("\\\\r"),
+            '\n' => out.push_str("\\\\n"),
+            character if character.is_ascii_punctuation() => {
+                out.push('\\');
+                out.push(character);
+            }
+            character => out.push(character),
+        }
+    }
+    out
+}
+
+fn backtick_fence(value: &str, minimum: usize) -> String {
+    let longest = value
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    "`".repeat((longest + 1).max(minimum))
+}
+
 pub fn render(snapshot: &ScanSnapshot, score: &ScoreSnapshot) -> String {
     render_document(snapshot, score, true)
 }
@@ -20,16 +45,22 @@ fn render_document(snapshot: &ScanSnapshot, score: &ScoreSnapshot, markdown: boo
         if !markdown {
             return value.to_owned();
         }
-        let longest_run = value
-            .split(|character| character != '`')
-            .map(str::len)
-            .max()
-            .unwrap_or(0);
-        let fence = "`".repeat(longest_run + 1);
-        if longest_run > 0 {
-            format!("{fence} {value} {fence}")
-        } else {
+        let value = value.replace('\r', "\\r").replace('\n', "\\n");
+        if value.is_empty() {
+            return value;
+        }
+        let fence = backtick_fence(&value, 1);
+        if value.chars().all(|character| character == ' ') {
             format!("{fence}{value}{fence}")
+        } else {
+            format!("{fence} {value} {fence}")
+        }
+    };
+    let prose = |value: &str| {
+        if markdown {
+            escape_markdown(value)
+        } else {
+            value.to_owned()
         }
     };
     let mut out = format!(
@@ -47,7 +78,7 @@ fn render_document(snapshot: &ScanSnapshot, score: &ScoreSnapshot, markdown: boo
         quality_score(score),
     );
     for line in summary_lines(score) {
-        let _ = writeln!(out, "- {line}");
+        let _ = writeln!(out, "- {}", prose(&line));
     }
     let _ = writeln!(out, "\n{section_heading}评分维度\n");
 
@@ -70,20 +101,31 @@ fn render_document(snapshot: &ScanSnapshot, score: &ScoreSnapshot, markdown: boo
             "{}:{}:{}-{}:{}",
             issue.file_path, issue.start_line, issue.start_column, issue.end_line, issue.end_column
         );
+        let evidence = if markdown {
+            let fence = backtick_fence(&issue.evidence, 3);
+            let newline = if issue.evidence.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            format!("\n\n{fence}text\n{}{newline}{fence}\n", issue.evidence)
+        } else {
+            issue.evidence.clone()
+        };
         let _ = writeln!(
             out,
             "{issue_heading}{} {}\n\n- 严重度：{:?}\n- 位置：{}\n- 来源：{}\n- 覆盖：{:?}，可信度：{:.0}%\n- 证据：{}\n- 说明：{}\n- 影响：{}\n- 建议：{}\n",
-            issue.title,
+            prose(&issue.title),
             code(&issue.id),
             issue.severity,
             code(&location),
             code(&issue.source),
             issue.coverage,
             issue.confidence * 100.0,
-            code(&issue.evidence),
-            issue.explanation,
-            issue.impact,
-            issue.recommendation,
+            evidence,
+            prose(&issue.explanation),
+            prose(&issue.impact),
+            prose(&issue.recommendation),
         );
     }
     if snapshot.issues.is_empty() {

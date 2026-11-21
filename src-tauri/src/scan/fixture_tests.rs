@@ -26,9 +26,11 @@ fn cache_key_changes_when_file_or_configuration_changes() {
 
 #[test]
 fn corrected_source_positions_do_not_reuse_legacy_rule_cache() {
-    let legacy = rule_cache_key("project", "main.py", "hash-a", "rules-2", "{}");
     let current = rule_cache_key("project", "main.py", "hash-a", RULE_VERSION, "{}");
-    assert_ne!(legacy, current);
+    for version in ["rules-2", "rules-3", "rules-4"] {
+        let legacy = rule_cache_key("project", "main.py", "hash-a", version, "{}");
+        assert_ne!(legacy, current);
+    }
 }
 
 #[test]
@@ -179,7 +181,7 @@ fn multiline_credentials_stay_redacted_through_cache_storage_and_reports() {
     let ordinary = "z".repeat(160);
     fs::write(
         fixture.0.join("main.py"),
-        format!("password: str = \"\"\"\n{secret}\n\"\"\"\npassword: str = f\"\"\"\n{secret}\n\"\"\"\npassword: str = (\n    r\"\"\"\n{secret}\n\"\"\"\n)\n{ordinary}\n"),
+        format!("password: str = \"\"\"\n{secret}\n\"\"\"\npassword: str = f\"\"\"\n{secret}\n\"\"\"\npassword: str = (\n    r\"\"\"\n{secret}\n\"\"\"\n)\npassword = (\n    \"part-one\"\n    \"{secret}\"\n)\npassword = make_client(\"synthetic-call-credential\").system(\"cmd\")\n{ordinary}\n"),
     )
     .unwrap();
     let state = AppState::in_memory().unwrap();
@@ -200,10 +202,18 @@ fn multiline_credentials_stay_redacted_through_cache_storage_and_reports() {
         assert!(snapshot.issues.iter().any(|issue| {
             issue.rule_id == "quality.long-line" && issue.evidence.contains(&ordinary)
         }));
+        assert!(snapshot.issues.iter().any(|issue| {
+            issue.rule_id == "security.dangerous-exec" && issue.evidence == "疑似凭据已隐藏"
+        }));
         assert!(
             !serde_json::to_string(&snapshot.issues)
                 .unwrap()
                 .contains(&secret)
+        );
+        assert!(
+            !serde_json::to_string(&snapshot.issues)
+                .unwrap()
+                .contains("synthetic-call-credential")
         );
         let file = store.get_file_for_run(id, "main.py").unwrap().unwrap();
         let cache_key = rule_cache_key(
@@ -215,6 +225,11 @@ fn multiline_credentials_stay_redacted_through_cache_storage_and_reports() {
         );
         let cached = store.get_cached_issues(&cache_key).unwrap().unwrap();
         assert!(!serde_json::to_string(&cached).unwrap().contains(&secret));
+        assert!(
+            !serde_json::to_string(&cached)
+                .unwrap()
+                .contains("synthetic-call-credential")
+        );
         let legacy_key = rule_cache_key(
             "fixture",
             "main.py",
@@ -233,9 +248,126 @@ fn multiline_credentials_stay_redacted_through_cache_storage_and_reports() {
         ] {
             let report = render_with_score(&snapshot, &score, format).unwrap();
             assert!(
-                !report.contains(&secret),
+                !report.contains(&secret) && !report.contains("synthetic-call-credential"),
                 "{format:?} exposed credential evidence"
             );
+        }
+    }
+}
+
+#[test]
+fn redacted_parameters_keep_distinct_locations_through_repeated_scans() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.0.join(".env.py"),
+        "def work(first, second):\n    password = \"synthetic-secret-value\"\n    return 1\n",
+    )
+    .unwrap();
+    let state = AppState::in_memory().unwrap();
+    register_project(&state, &fixture.0);
+    let sink: EventSink = Box::new(|_| {});
+    let mut fingerprints = Vec::new();
+    for id in ["parameters-first", "parameters-cached"] {
+        let params = seed_job(&state, id, &fixture.0);
+        run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
+        let store = state.storage().unwrap();
+        assert_eq!(
+            store.get_scan_run(id).unwrap().unwrap().status,
+            ScanStatus::Completed
+        );
+        let issues = store.list_issues(id).unwrap();
+        let mut parameters: Vec<_> = issues
+            .iter()
+            .filter(|issue| issue.rule_id == "quality.unused-parameter")
+            .collect();
+        parameters.sort_by_key(|issue| issue.start_column);
+        assert_eq!(parameters.len(), 2);
+        assert!(parameters.iter().all(|issue| {
+            issue.file_path == ".env.py" && issue.evidence == "疑似凭据已隐藏"
+        }));
+        assert_ne!(parameters[0].id, parameters[1].id);
+        assert_ne!(parameters[0].fingerprint, parameters[1].fingerprint);
+        assert_eq!(
+            (parameters[0].start_line, parameters[0].start_column),
+            (1, 10)
+        );
+        assert_eq!(
+            (parameters[1].start_line, parameters[1].start_column),
+            (1, 17)
+        );
+        assert!(
+            !serde_json::to_string(&issues)
+                .unwrap()
+                .contains("synthetic-secret-value")
+        );
+        let current: Vec<_> = parameters
+            .iter()
+            .map(|issue| issue.fingerprint.clone())
+            .collect();
+        if fingerprints.is_empty() {
+            fingerprints = current;
+        } else {
+            assert_eq!(fingerprints, current);
+        }
+    }
+}
+
+#[test]
+fn redacted_import_bindings_keep_distinct_locations_through_repeated_scans() {
+    let fixture = Fixture::new();
+    fs::write(fixture.0.join(".env.py"), "import os, sys\n").unwrap();
+    fs::write(
+        fixture.0.join("main.py"),
+        "import os, sys  # password = \"fixture-only-value\"\n",
+    )
+    .unwrap();
+    let state = AppState::in_memory().unwrap();
+    register_project(&state, &fixture.0);
+    let sink: EventSink = Box::new(|_| {});
+    let mut fingerprints = Vec::new();
+    for id in ["imports-first", "imports-cached"] {
+        let params = seed_job(&state, id, &fixture.0);
+        run_scan_job(&params, &JobHandle::new(), &sink, &state.storage).unwrap();
+        let store = state.storage().unwrap();
+        assert_eq!(
+            store.get_scan_run(id).unwrap().unwrap().status,
+            ScanStatus::Completed
+        );
+        let issues = store.list_issues(id).unwrap();
+        let mut current = Vec::new();
+        for path in [".env.py", "main.py"] {
+            let mut imports: Vec<_> = issues
+                .iter()
+                .filter(|issue| issue.file_path == path && issue.rule_id == "quality.unused-import")
+                .collect();
+            imports.sort_by_key(|issue| issue.start_column);
+            assert_eq!(imports.len(), 2, "{path} in {id}: {imports:?}");
+            assert_ne!(imports[0].id, imports[1].id);
+            assert_ne!(imports[0].fingerprint, imports[1].fingerprint);
+            for (issue, (start, end)) in imports.into_iter().zip([(8, 10), (12, 15)]) {
+                assert_eq!(
+                    (
+                        issue.start_line,
+                        issue.start_column,
+                        issue.end_line,
+                        issue.end_column
+                    ),
+                    (1, start, 1, end),
+                    "{path} in {id}"
+                );
+                assert_eq!(issue.evidence, "疑似凭据已隐藏", "{path} in {id}");
+                current.push(issue.fingerprint.clone());
+            }
+        }
+        assert!(
+            !serde_json::to_string(&issues)
+                .unwrap()
+                .contains("fixture-only-value")
+        );
+        if fingerprints.is_empty() {
+            fingerprints = current;
+        } else {
+            assert_eq!(fingerprints, current);
         }
     }
 }

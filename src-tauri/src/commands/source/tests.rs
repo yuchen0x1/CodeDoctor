@@ -438,6 +438,24 @@ fn redacts_parenthesized_multiline_credentials() {
 }
 
 #[test]
+fn redacts_concatenated_credential_when_excerpt_starts_after_the_assignment() {
+    let fixture = Fixture::create();
+    let text = format!(
+        "password = (\n{}    \"synthetic-concatenated-credential\"\n)\nprint('done')\n",
+        "    \"part )\"\n".repeat(12)
+    );
+    let state = fixture.directory_state("example.py", text.as_bytes(), 14, 14);
+    let context = read(&state);
+    assert!(context.start_line > 1);
+    assert!(context.redacted);
+    assert!(!context.text.contains("synthetic-concatenated-credential"));
+    assert!(!context.text.contains("part )"));
+    assert!(context.text.contains("print('done')"));
+    assert!(!context.can_open_natively);
+    assert!(open_issue_source_state(&state, RUN, ISSUE).is_err());
+}
+
+#[test]
 fn keeps_unrelated_multiline_code_visible() {
     let fixture = Fixture::create();
     let text = "message = \"\"\"\nordinary synthetic text marker\n\"\"\"\nprint('done')\n";

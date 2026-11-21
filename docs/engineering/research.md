@@ -171,3 +171,17 @@
 | [Trivy](https://github.com/aquasecurity/trivy) · Apache-2.0 | Go CLI 聚合漏洞、配置、许可和凭据检测；[Secret Scanning](https://github.com/aquasecurity/trivy/blob/main/docs/guide/scanner/secret.md)列出规则、允许路径及遮蔽输出示例。 | 凭据覆盖由规则与排除边界决定；未命中不代表不存在凭据，漏洞数据库等网络需求不等于本地扫描。 | 凭据遮蔽仍明示为保守启发式；不把新的敏感行判断包装为全量 DLP，不新增大型扫描依赖。 |
 
 这些项目主要提供 CLI 或编辑器诊断；本次没有对其 GUI、安装器、资源占用或实际扫描速度作实测比较。CodeDoctor 保留 Windows 十工作区、SQLite 历史、离线目录/ZIP 与 Linux CLI 的定位，不引入中央服务。新增回归覆盖带类型注解的多行值，以及规则→缓存→数据库→五种报告的完整证据通路；历史记录与已导出的文件不被自动改写，分享前仍需检查。
+
+## 2026-11-21 发布收敛：缓存身份与字面报告
+
+本次在 00:07–00:18 UTC 通过 GitHub API 实际重读下列五个仓库的 README、许可证和所列实现；五仓均未归档。这里只记录相对前述研究新增的具体证据，不把推送日期等同于发布日期，不复制第三方代码，不声称实测过其界面或性能。
+
+| 项目及本次核验许可 | 具体实现证据 | CodeDoctor 对照与决定 |
+| --- | --- | --- |
+| [Semgrep](https://github.com/semgrep/semgrep) · LGPL-2.1 | [OCaml SARIF 输出](https://github.com/semgrep/semgrep/blob/develop/src/osemgrep/reporting/Sarif_output.ml)会写入源码 snippet；[metrics 说明](https://github.com/semgrep/semgrep/blob/develop/metrics.md)区分配置与遥测。 | 本地执行不保证导出无源码；继续对整条 Issue、缓存和五格式报告断言无合成凭据，不仅检查 evidence。 |
+| [Biome](https://github.com/biomejs/biome) · MIT OR Apache-2.0 | [Workspace](https://github.com/biomejs/biome/blob/main/crates/biome_service/src/workspace.rs)统一客户端 API，并描述 AST/诊断缓存生命周期。 | 维持 Rust 核心与薄界面；参数定位由解析器统一提供，复合文件坐标同样映射回原文，保留旧序列化结果兼容性。 |
+| [Ruff](https://github.com/astral-sh/ruff) · MIT，含第三方声明 | [缓存](https://github.com/astral-sh/ruff/blob/main/crates/ruff/src/cache.rs)隔离版本、项目与配置；所读文件缓存键包含 mtime/权限，缓存状态为 linted/formatted，而非任意诊断全文。 | 借鉴语义版本失效，不照搬 mtime 为内容一致性保证；保留本项目内容哈希与完整配置键，规则语义升为 `rules-5`。 |
+| [reviewdog](https://github.com/reviewdog/reviewdog) · MIT | [SARIF parser](https://github.com/reviewdog/reviewdog/blob/master/parser/sarif.go)优先 Markdown message、保留原始结果；[diff filter](https://github.com/reviewdog/reviewdog/blob/master/filter/diff_filter.go)只控制呈现范围。 | 互操作格式不是净化器，展示过滤也不是增量分析正确性；对 Markdown 字段和多行证据分别处理上下文。 |
+| [SonarQube](https://github.com/SonarSource/sonarqube) · 根 LGPL v3；所读 Java 文件 LGPL-3.0-or-later | [报告提交](https://github.com/SonarSource/sonarqube/blob/master/server/sonar-webserver-webapi/src/main/java/org/sonar/server/ce/ws/SubmitAction.java)进入异步任务并检查分析权限；[缓存持久化](https://github.com/SonarSource/sonarqube/blob/master/server/sonar-ce-task-projectanalysis/src/main/java/org/sonar/ce/task/projectanalysis/step/PersistScannerAnalysisCacheStep.java)按分支事务替换。 | 保留本地 SQLite 阶段事务；在落库前确保最终指纹唯一、真实位置不同的发现不被吞并。不引入服务端，也不外推商业产品或分析器的许可。 |
+
+报告渲染另对照 [CommonMark 0.31.2 官方规范](https://github.com/commonmark/commonmark-spec/blob/0.31.2/spec.txt)：段落不能跨空行，行内代码将换行归一为空格；普通字段可转义 ASCII 标点，原始 HTML 默认不转义，多行证据宜使用独立围栏。采用超过证据中最长反引号串的围栏，并用 MIT 许可的 `pulldown-cmark` 0.13.6 在测试中实际解析事件，断言不可信文本没有生成 HTML、链接或图片。该依赖仅用于开发测试，未新增发行运行时依赖。下游查看器的非标准扩展、清洗和网络设置仍需单独审查。

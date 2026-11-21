@@ -22,6 +22,7 @@ use super::source_redaction::{is_credential_path, sensitive_source_lines};
 use super::{Rule, RuleContext, dedup_drafts, draft_to_issue};
 use crate::domain::types::Issue;
 use crate::parse::ParsedFile;
+use std::collections::HashSet;
 
 /// Runs the internal rule set over one scan's parsed files.
 pub struct RuleRunner {
@@ -84,6 +85,7 @@ impl RuleRunner {
     /// Runs all enabled rules; returns issues sorted by file then position.
     pub fn run(&self, files: &[ParsedFile], config: &RuleConfig) -> Vec<Issue> {
         let mut issues = Vec::new();
+        let mut fingerprints = HashSet::new();
         for parsed in files {
             let ctx = RuleContext {
                 file: &parsed.file,
@@ -93,7 +95,7 @@ impl RuleRunner {
             };
             let coverage = parsed.parse.coverage;
             let credential_file = is_credential_path(&parsed.file.relative_path);
-            let sensitive_lines: Vec<u32> = sensitive_source_lines(&parsed.text)
+            let sensitive_lines: Vec<u32> = sensitive_source_lines(&parsed.text, ctx.language())
                 .enumerate()
                 .filter_map(|(index, (_, sensitive))| sensitive.then_some(index as u32 + 1))
                 .collect();
@@ -113,7 +115,11 @@ impl RuleRunner {
                     {
                         draft.evidence = "疑似凭据已隐藏".into();
                     }
-                    issues.push(draft_to_issue(&draft, &parsed.file.relative_path, coverage));
+                    let issue = draft_to_issue(&draft, &parsed.file.relative_path, coverage);
+                    // Redaction can merge evidence; only final identities are safe to persist.
+                    if fingerprints.insert(issue.fingerprint.clone()) {
+                        issues.push(issue);
+                    }
                 }
             }
         }
@@ -242,12 +248,56 @@ mod tests {
     }
 
     #[test]
+    fn computed_function_names_do_not_leak_literals_through_parameter_evidence() {
+        let text = "const password = { [derive(\"fixture-only-value\")](\n  unused\n) {} };\n";
+        let f = file("JavaScript", "config.js");
+        let parsed = crate::parse::ParserRegistry::parse(&f, text);
+        assert_eq!(parsed.coverage, CoverageKind::Ast);
+        let issues = run_on_file(&f, text, &RuleConfig::default());
+        let parameter = issues
+            .iter()
+            .find(|issue| issue.rule_id == "quality.unused-parameter")
+            .expect("computed methods must still report unused parameters");
+        assert_eq!((parameter.start_line, parameter.start_column), (2, 3));
+        assert!(parameter.evidence.contains("unused"));
+        assert!(
+            !serde_json::to_string(&issues)
+                .unwrap()
+                .contains("fixture-only-value")
+        );
+    }
+
+    #[test]
+    fn redacted_findings_keep_distinct_columns_and_final_identities_are_unique() {
+        let f = file("Python", ".env.py");
+        let text = "a = b\n";
+        let parsed = ParsedFile {
+            file: f.clone(),
+            text: text.into(),
+            parse: crate::parse::ParserRegistry::parse(&f, text),
+        };
+        let runner = RuleRunner {
+            rules: vec![Box::new(NamingRule), Box::new(NamingRule)],
+        };
+        let issues = runner.run(&[parsed], &RuleConfig::default());
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].start_column, 1);
+        assert_eq!(issues[1].start_column, 5);
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.evidence == "疑似凭据已隐藏")
+        );
+        assert_ne!(issues[0].fingerprint, issues[1].fingerprint);
+    }
+
+    #[test]
     fn runner_sorts_issues_by_file_and_line() {
         let config = RuleConfig::default();
         let parsed = vec![
             ParsedFile {
                 file: file("Python", "b.py"),
-                text: "import os\n".repeat(1) + &"y = 12345\n",
+                text: "import os\ny = 12345\n".to_owned(),
                 parse: crate::parse::ParserRegistry::parse(
                     &file("Python", "b.py"),
                     "import os\ny = 12345\n",

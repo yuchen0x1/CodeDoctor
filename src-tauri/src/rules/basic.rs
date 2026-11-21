@@ -97,6 +97,7 @@ impl Rule for NamingRule {
                     line,
                     identifier.range.end_line,
                 )
+                .columns(identifier.range.start_column, identifier.range.end_column)
                 .title("命名不清晰")
                 .evidence(format!(
                     "标识符 `{name}`（{}:{}）",
@@ -167,8 +168,16 @@ impl Rule for UnusedImportRule {
             if used {
                 continue;
             }
+            let range = import.binding_range.as_ref().unwrap_or(&import.range);
             drafts.push(
-                IssueDraft::new(self.id(), self.category(), self.default_severity(), import.range.start_line, import.range.end_line)
+                IssueDraft::new(
+                    self.id(),
+                    self.category(),
+                    self.default_severity(),
+                    range.start_line,
+                    range.end_line,
+                )
+                    .columns(range.start_column, range.end_column)
                     .title("疑似未使用的导入")
                     .evidence(format!("导入 `{binding}`（{}）在文件其余部分未出现", import.module))
                     .explanation(format!(
@@ -215,7 +224,7 @@ impl Rule for UnusedParameterRule {
             let Some(body) = &function.body_range else {
                 continue;
             };
-            for param in &function.parameters {
+            for (index, param) in function.parameters.iter().enumerate() {
                 let name = param.trim();
                 if param_is_ignored(language, name) || name.is_empty() {
                     continue;
@@ -228,19 +237,21 @@ impl Rule for UnusedParameterRule {
                 if used {
                     continue;
                 }
+                let range = function
+                    .parameter_ranges
+                    .get(index)
+                    .unwrap_or(&function.range);
                 drafts.push(
                     IssueDraft::new(
                         self.id(),
                         self.category(),
                         self.default_severity(),
-                        function.range.start_line,
-                        function.range.end_line,
+                        range.start_line,
+                        range.end_line,
                     )
+                    .columns(range.start_column, range.end_column)
                     .title("疑似未使用的函数参数")
-                    .evidence(format!(
-                        "函数 `{}` 的参数 `{name}` 在函数体内未出现",
-                        function.name
-                    ))
+                    .evidence(format!("参数 `{name}` 在函数体内未出现"))
                     .explanation("参数未被函数体引用，可能是残留的旧接口参数或占位参数。")
                     .impact("误导调用者以为该参数有作用，增加接口理解成本。")
                     .recommendation(

@@ -240,13 +240,19 @@ impl Rule for DangerousExecRule {
                 if !hit {
                     continue;
                 }
+                let display_name = if EXEC_CALLS.contains(&last) {
+                    last
+                } else {
+                    "命令执行 API"
+                };
                 drafts.push(
                     IssueDraft::new(self.id(), self.category(), self.default_severity(), call.range.start_line, call.range.end_line)
+                        .columns(call.range.start_column, call.range.end_column)
                         .evidence(clamp(&call.callee, 200))
                         .title("潜在不安全命令/动态执行")
                         .explanation(format!(
                             "调用 `{}`（语法级证据，待人工确认）：若执行内容包含外部输入，存在命令注入/任意代码执行风险。",
-                            call.callee
+                            display_name
                         ))
                         .impact("外部输入进入执行通道时可能导致任意代码执行。")
                         .recommendation("避免拼接命令字符串；使用白名单参数与数组形式 API；确认输入来源可信时可忽略。")

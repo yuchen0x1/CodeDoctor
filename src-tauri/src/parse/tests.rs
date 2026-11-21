@@ -43,6 +43,52 @@ fn python_ast_extracts_structures_ranges_and_metrics() {
 }
 
 #[test]
+fn parameter_ranges_match_names_and_legacy_parse_results_remain_readable() {
+    for (language, path, text) in [
+        (
+            "Python",
+            "params.py",
+            "def first(first,\r\n          second=1):\r\n    return 0\r\n",
+        ),
+        (
+            "JavaScript",
+            "params.js",
+            "const first = (first, second = 1) => 0;",
+        ),
+        (
+            "TypeScript",
+            "params.ts",
+            "function first(first: string, second: number = 1) { return 0; }",
+        ),
+        (
+            "Rust",
+            "params.rs",
+            "fn first(first: usize, second: usize) -> usize { 0 }",
+        ),
+        (
+            "Vue",
+            "params.vue",
+            "<template>中文</template>\r\n<script setup lang=\"ts\">\r\nfunction first(first: string, second: number) { return 0; }\r\n</script>",
+        ),
+    ] {
+        let parsed = ParserRegistry::parse(&file(language, path), text);
+        let function = &parsed.functions[0];
+        assert_eq!(function.parameters, ["first", "second"], "{language}");
+        assert_eq!(function.parameter_ranges.len(), 2, "{language}");
+        for (name, range) in function.parameters.iter().zip(&function.parameter_ranges) {
+            assert_eq!(&text[range.start_byte..range.end_byte], name, "{language}");
+            assert!(range.start_column > 0);
+        }
+        let mut legacy = serde_json::to_value(&parsed).unwrap();
+        for function in legacy["functions"].as_array_mut().unwrap() {
+            function.as_object_mut().unwrap().remove("parameterRanges");
+        }
+        let legacy: ParseResult = serde_json::from_value(legacy).unwrap();
+        assert!(legacy.functions[0].parameter_ranges.is_empty());
+    }
+}
+
+#[test]
 fn typescript_class_uses_real_grammar_fields() {
     let parsed = ParserRegistry::parse(
         &file("TypeScript", "metrics.ts"),

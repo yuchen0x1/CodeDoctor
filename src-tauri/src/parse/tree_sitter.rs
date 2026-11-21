@@ -270,8 +270,8 @@ fn extract_function(
         .parent_class_fn
         .and_then(|f| f(node, text))
         .or_else(|| enclosing_class.map(str::to_owned));
-    let parameters = find_params(spec, node)
-        .map(|container| params_of(container, text))
+    let (parameters, parameter_ranges) = find_params(spec, node)
+        .map(|container| params_of(container, text, index))
         .unwrap_or_default();
     let body_range = node.child_by_field_name("body").map(|n| range_of(n, index));
     FunctionInfo {
@@ -279,6 +279,7 @@ fn extract_function(
         range: range_of(node, index),
         body_range,
         parameters,
+        parameter_ranges,
         metrics: FunctionMetrics::default(),
         parent_class,
         is_exported: (spec.exported_fn)(node, text),
@@ -356,30 +357,25 @@ const PARAMETER_CONTAINERS: &[&str] = &[
     "formal_parameter_list",
 ];
 
-fn params_of(container: Node, text: &str) -> Vec<String> {
+fn params_of(container: Node, text: &str, index: &LineIndex) -> (Vec<String>, Vec<SourceRange>) {
     let bytes = text.as_bytes();
-    if PARAMETER_CONTAINERS.contains(&container.kind()) {
-        let mut cursor = container.walk();
-        container
-            .children(&mut cursor)
-            .filter(|child| child.is_named())
-            .map(|child| clamp_text(param_name(child, bytes), 60))
-            .filter(|p| !p.is_empty() && p != ",")
-            .collect()
+    let mut cursor = container.walk();
+    let nodes: Vec<_> = if PARAMETER_CONTAINERS.contains(&container.kind()) {
+        container.named_children(&mut cursor).collect()
     } else {
-        vec![clamp_text(param_name(container, bytes), 60)]
-    }
-}
-
-fn param_name<'a>(node: Node<'a>, bytes: &'a [u8]) -> &'a str {
-    for field in ["name", "pattern", "left"] {
-        if let Some(n) = node.child_by_field_name(field) {
-            if let Ok(t) = n.utf8_text(bytes) {
-                return t;
-            }
-        }
-    }
-    node.utf8_text(bytes).unwrap_or("")
+        vec![container]
+    };
+    nodes
+        .into_iter()
+        .filter_map(|node| {
+            let target = ["name", "pattern", "left"]
+                .into_iter()
+                .find_map(|field| node.child_by_field_name(field))
+                .unwrap_or(node);
+            let name = clamp_text(target.utf8_text(bytes).unwrap_or(""), 60);
+            (!name.is_empty() && name != ",").then(|| (name, range_of(target, index)))
+        })
+        .unzip()
 }
 
 fn extract_class(spec: &'static LangSpec, node: Node, text: &str) -> ClassInfo {
@@ -703,12 +699,18 @@ fn remap_result(result: &mut ParseResult, shift: usize, index: &LineIndex) {
         if let Some(body) = &mut f.body_range {
             fix(body, shift, index);
         }
+        for parameter in &mut f.parameter_ranges {
+            fix(parameter, shift, index);
+        }
     }
     for c in &mut result.classes {
         fix(&mut c.range, shift, index);
     }
     for i in &mut result.imports {
         fix(&mut i.range, shift, index);
+        if let Some(binding) = &mut i.binding_range {
+            fix(binding, shift, index);
+        }
     }
     for c in &mut result.calls {
         fix(&mut c.range, shift, index);
@@ -784,6 +786,61 @@ fn script_blocks(text: &str) -> Vec<ScriptBlock> {
         });
     }
     blocks
+}
+
+/// Maps real opening parentheses to their final source line for privacy spans.
+/// Grammar tokens, not characters inside strings/comments, determine the close.
+pub(crate) fn parenthesized_ends(
+    language: &str,
+    text: &str,
+) -> Option<std::collections::HashMap<usize, u32>> {
+    let index = LineIndex::new(text);
+    let blocks = if super::languages::is_composite(language) {
+        script_blocks(text)
+    } else {
+        let spec = spec_for(language)?;
+        vec![ScriptBlock {
+            content_start: 0,
+            content_end: text.len(),
+            lang: spec.language,
+        }]
+    };
+    let mut ends = std::collections::HashMap::new();
+    for block in blocks {
+        let language = match block.lang {
+            "tsx" => "TSX",
+            "ts" => "TypeScript",
+            "js" => "JavaScript",
+            other => other,
+        };
+        let Some(spec) = spec_for(language) else {
+            continue;
+        };
+        let mut parser = ::tree_sitter::Parser::new();
+        if parser.set_language(&(spec.grammar)()).is_err() {
+            continue;
+        }
+        let content = &text[block.content_start..block.content_end];
+        let Some(tree) = parser.parse(content, None) else {
+            continue;
+        };
+        let mut stack = vec![tree.root_node()];
+        while let Some(node) = stack.pop() {
+            if !node.has_error()
+                && node.child(0).is_some_and(|child| child.kind() == "(")
+                && node
+                    .child(node.child_count().saturating_sub(1))
+                    .is_some_and(|child| child.kind() == ")" && !child.is_missing())
+            {
+                let start = block.content_start + node.start_byte();
+                let end = block.content_start + node.end_byte();
+                ends.insert(start, index.line_col(end).0);
+            }
+            let mut cursor = node.walk();
+            stack.extend(node.named_children(&mut cursor));
+        }
+    }
+    Some(ends)
 }
 
 /// Parses a composite file by partitioning its script blocks.
