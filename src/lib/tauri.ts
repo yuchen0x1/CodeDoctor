@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AnalyzerRun,
   HistoryDiff,
+  HistoryReportFormat,
   ArchitectureGraph,
   IndexSummary,
   IssuePage,
@@ -114,6 +115,15 @@ export function listScanRuns(projectId: string): Promise<ScanRun[]> {
 
 export function compareScanHistory(baseRunId: string, targetRunId: string): Promise<HistoryDiff> {
   return invoke<HistoryDiff>("compare_scan_history", { baseRunId, targetRunId });
+}
+
+export function exportHistoryReport(
+  baseRunId: string,
+  targetRunId: string,
+  format: HistoryReportFormat,
+  destination: string,
+): Promise<void> {
+  return invoke<void>("export_history_report", { baseRunId, targetRunId, format, destination });
 }
 
 export function getArchitectureGraph(runId: string, projectId: string): Promise<ArchitectureGraph> {

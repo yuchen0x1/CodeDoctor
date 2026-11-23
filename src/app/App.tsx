@@ -23,6 +23,7 @@ import {
   calculateReport,
   cancelScan,
   compareScanHistory,
+  exportHistoryReport,
   exportIssueList,
   exportReport,
   exportStoredPrompt,
@@ -40,7 +41,7 @@ import {
   startScan,
   restoreProject,
 } from "../lib/tauri";
-import { pickIssueListDestination, pickProjectArchive, pickProjectDirectory, pickPromptDestination, pickReportDestination } from "../lib/nativeDialogs";
+import { pickHistoryReportDestination, pickIssueListDestination, pickProjectArchive, pickProjectDirectory, pickPromptDestination, pickReportDestination } from "../lib/nativeDialogs";
 import { readSettings, writeSettings, type AppSettings } from "../lib/settings";
 import { openIssueSource, readIssueSource } from "../lib/sourceContext";
 
@@ -137,6 +138,10 @@ export default function App() {
   const [path, setPath] = useState("");
   const [reportFormat, setReportFormat] = useState<ReportFormat>("markdown");
   const [reportDestination, setReportDestination] = useState("");
+  const [historyReportFormat, setHistoryReportFormat] = useState<"json" | "markdown">("markdown");
+  const [historyReportDestination, setHistoryReportDestination] = useState("");
+  const [historyReportPathPending, setHistoryReportPathPending] = useState(false);
+  const historyReportPathPendingRef = useRef(false);
   const [reportPathPending, setReportPathPending] = useState(false);
   const reportPathPendingRef = useRef(false);
   const [error, setError] = useState("");
@@ -410,6 +415,38 @@ export default function App() {
     } catch (reason) { setError(safeError(reason)); }
   };
 
+  const chooseHistoryReportPath = async () => {
+    if (historyReportPathPendingRef.current || !baseRunId || !targetRunId || baseRunId === targetRunId) return;
+    historyReportPathPendingRef.current = true;
+    setHistoryReportPathPending(true);
+    try {
+      const destination = await pickHistoryReportDestination(historyReportFormat);
+      if (destination) setHistoryReportDestination(destination);
+    } catch (reason) {
+      setError(safeError(reason));
+    } finally {
+      historyReportPathPendingRef.current = false;
+      setHistoryReportPathPending(false);
+    }
+  };
+
+  const exportHistory = async () => {
+    if (!baseRunId || !targetRunId || baseRunId === targetRunId || !historyReportDestination.trim()) {
+      setError("请选择基线和目标扫描，并填写对比报告路径。");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await exportHistoryReport(baseRunId, targetRunId, historyReportFormat, historyReportDestination.trim());
+      setNotice("基线对比报告已写入：" + historyReportDestination.trim());
+    } catch (reason) {
+      setError(safeError(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const controlScan = async (action: (id: string) => Promise<void>) => {
     if (!runId) return;
     try {
@@ -533,7 +570,8 @@ export default function App() {
       {page === "history" && <History project={project} runs={historyRuns} baseRunId={baseRunId} targetRunId={targetRunId} reportRunId={reportRunId}
         setBaseRunId={(value) => { historyRequest.current += 1; setBaseRunId(value); setHistoryDiff(null); }} setTargetRunId={(value) => { historyRequest.current += 1; setTargetRunId(value); setHistoryDiff(null); }}
         setReportRunId={(value) => { if (!reportPathPendingRef.current) setReportRunId(value); }} diff={historyDiff?.baseRunId === baseRunId && historyDiff.targetRunId === targetRunId ? historyDiff : null} issueDetails={historyIssueDetails} busy={busy} reportPathPending={reportPathPending} onCompare={compareHistory} format={reportFormat}
-        setFormat={(value) => { if (reportPathPendingRef.current) return; setReportFormat(value); setReportDestination(""); }} destination={reportDestination} setDestination={(value) => { if (!reportPathPendingRef.current) setReportDestination(value); }} onChooseDestination={chooseReportPath} onExport={exportCurrentReport} />}
+        setFormat={(value) => { if (reportPathPendingRef.current) return; setReportFormat(value); setReportDestination(""); }} destination={reportDestination} setDestination={(value) => { if (!reportPathPendingRef.current) setReportDestination(value); }} onChooseDestination={chooseReportPath} onExport={exportCurrentReport}
+        historyReportFormat={historyReportFormat} setHistoryReportFormat={(value) => { if (!historyReportPathPendingRef.current) { setHistoryReportFormat(value); setHistoryReportDestination(""); } }} historyReportDestination={historyReportDestination} setHistoryReportDestination={(value) => { if (!historyReportPathPendingRef.current) setHistoryReportDestination(value); }} historyReportPathPending={historyReportPathPending} onChooseHistoryReportDestination={chooseHistoryReportPath} onExportHistory={exportHistory} />}
       {page === "settings" && <SettingsView settings={settings} onSave={(next: AppSettings) => {
         writeSettings(next);
         setSettings(next);
@@ -788,7 +826,7 @@ function Prompts({ run, issues, findingsState, prompt, mode, setMode, baseline, 
   </section>;
 }
 
-function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRunId, setTargetRunId, setReportRunId, diff, issueDetails, busy, reportPathPending, onCompare, format, setFormat, destination, setDestination, onChooseDestination, onExport }: {
+function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRunId, setTargetRunId, setReportRunId, diff, issueDetails, busy, reportPathPending, onCompare, format, setFormat, destination, setDestination, onChooseDestination, onExport, historyReportFormat, setHistoryReportFormat, historyReportDestination, setHistoryReportDestination, historyReportPathPending, onChooseHistoryReportDestination, onExportHistory }: {
   project: ProjectSummary | null;
   runs: ScanRun[];
   baseRunId: string;
@@ -808,6 +846,13 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
   setDestination: (value: string) => void;
   onChooseDestination: () => void;
   onExport: () => void;
+  historyReportFormat: "json" | "markdown";
+  setHistoryReportFormat: (value: "json" | "markdown") => void;
+  historyReportDestination: string;
+  setHistoryReportDestination: (value: string) => void;
+  historyReportPathPending: boolean;
+  onChooseHistoryReportDestination: () => void;
+  onExportHistory: () => void;
 }) {
   const completedRuns = runs.filter(completed);
   const reportBusy = busy || reportPathPending;
@@ -847,6 +892,19 @@ function History({ project, runs, baseRunId, targetRunId, reportRunId, setBaseRu
             <span className="pill">{severity}</span>
           </article>;
         })}</div>
+        <div className="report-export history-report-export">
+          <h3>导出基线对比</h3>
+          <p className="muted">将新增、已解决、持续和位置/严重度变化保存为可评审报告。</p>
+          <div className="history-controls">
+            <select aria-label="对比报告格式" value={historyReportFormat} disabled={busy || historyReportPathPending} onChange={(event) => setHistoryReportFormat(event.target.value as "json" | "markdown")}>
+              <option value="markdown">Markdown</option>
+              <option value="json">JSON</option>
+            </select>
+            <input aria-label="对比报告保存路径" value={historyReportDestination} disabled={historyReportPathPending} onChange={(event) => setHistoryReportDestination(event.target.value)} placeholder="对比报告保存路径" />
+            <button className="button button--quiet" disabled={busy || historyReportPathPending} onClick={onChooseHistoryReportDestination}>选择对比保存位置</button>
+            <button className="button button--primary" disabled={busy || historyReportPathPending || !historyReportDestination.trim()} onClick={onExportHistory}>导出对比报告</button>
+          </div>
+        </div>
       </> : <p className="muted">选择同一项目的两个已完成扫描，查看问题、评分和覆盖率变化。</p>}
       <div className="report-export">
         <h3>导出报告</h3>

@@ -1,10 +1,12 @@
-use crate::domain::types::ScanRun;
 use crate::domain::types::ScanStatus;
+use crate::domain::types::{ScanRun, ScoreSnapshot};
 use crate::error::AppError;
 use crate::history::{HistoryDiff, compare_scans};
+use crate::report::history::{render_json, render_markdown};
 use crate::score::{SCORING_VERSION, ScanSnapshot};
 use crate::state::AppState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 #[cfg(feature = "desktop")]
 use tauri::State;
 
@@ -19,6 +21,92 @@ fn snapshot(state: &AppState, run_id: &str) -> Result<ScanSnapshot, AppError> {
         ));
     }
     ScanSnapshot::load(&store, run)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryReportFormat {
+    Json,
+    Markdown,
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn export_history_report(
+    state: tauri::State<AppState>,
+    base_run_id: String,
+    target_run_id: String,
+    format: HistoryReportFormat,
+    destination: String,
+) -> Result<(), AppError> {
+    export_history_report_state(&state, &base_run_id, &target_run_id, format, &destination)
+}
+
+fn export_history_report_state(
+    state: &AppState,
+    base_run_id: &str,
+    target_run_id: &str,
+    format: HistoryReportFormat,
+    destination: &str,
+) -> Result<(), AppError> {
+    if base_run_id == target_run_id {
+        return Err(AppError::Validation(
+            "baseline and target scans must be different".into(),
+        ));
+    }
+    let extension = match format {
+        HistoryReportFormat::Json => "json",
+        HistoryReportFormat::Markdown => "md",
+    };
+    let path = Path::new(destination);
+    if !path.is_absolute()
+        || !path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+    {
+        return Err(AppError::Validation(
+            "history report destination is invalid".into(),
+        ));
+    }
+    let base = snapshot(state, base_run_id)?;
+    let target = snapshot(state, target_run_id)?;
+    if base.run.project_id != target.run.project_id {
+        return Err(AppError::Validation(
+            "history comparison requires scans from the same project".into(),
+        ));
+    }
+    let (base_score, target_score) = {
+        let store = state.storage()?;
+        let current = |run_id: &str| -> Result<Option<ScoreSnapshot>, AppError> {
+            Ok(store.get_score(run_id)?.filter(|score| {
+                score.dimensions["scoringVersion"].as_str() == Some(SCORING_VERSION)
+            }))
+        };
+        (current(base_run_id)?, current(target_run_id)?)
+    };
+    let diff = compare_scans(&base, &target, base_score.as_ref(), target_score.as_ref());
+    let content = match format {
+        HistoryReportFormat::Json => render_json(
+            &base,
+            &target,
+            &diff,
+            base_score.as_ref(),
+            target_score.as_ref(),
+        )?,
+        HistoryReportFormat::Markdown => render_markdown(
+            &base,
+            &target,
+            &diff,
+            base_score.as_ref(),
+            target_score.as_ref(),
+        ),
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, content)
+        .map_err(|_| AppError::Io("history report could not be written".into()))
 }
 
 #[cfg(feature = "desktop")]

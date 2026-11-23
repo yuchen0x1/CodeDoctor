@@ -4,14 +4,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistoryDiff, Issue, ProjectRecord, ProjectSummary, ReportResult, ScanRun } from "../lib/contracts";
 import * as bridge from "../lib/tauri";
-import { pickProjectDirectory, pickReportDestination } from "../lib/nativeDialogs";
+import { pickHistoryReportDestination, pickProjectDirectory, pickReportDestination } from "../lib/nativeDialogs";
 import App from "./App";
 
 vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false }));
 vi.mock("../lib/tauri", () => ({
   health: vi.fn(), listProjects: vi.fn(), restoreProject: vi.fn(), importProject: vi.fn(),
   listScanRuns: vi.fn(), getScan: vi.fn(), listIssues: vi.fn(), calculateReport: vi.fn(),
-  listAnalyzerRuns: vi.fn(), compareScanHistory: vi.fn(), exportReport: vi.fn(),
+  listAnalyzerRuns: vi.fn(), compareScanHistory: vi.fn(), exportHistoryReport: vi.fn(), exportReport: vi.fn(),
   cancelScan: vi.fn(), exportIssueList: vi.fn(), exportStoredPrompt: vi.fn(),
   generateGovernancePrompt: vi.fn(), listenToScanProgress: vi.fn(), pauseScan: vi.fn(),
   resumeScan: vi.fn(), startScan: vi.fn(),
@@ -19,6 +19,7 @@ vi.mock("../lib/tauri", () => ({
 vi.mock("../lib/nativeDialogs", () => ({
   pickProjectDirectory: vi.fn(), pickProjectArchive: vi.fn(), pickIssueListDestination: vi.fn(),
   pickPromptDestination: vi.fn(), pickReportDestination: vi.fn(),
+  pickHistoryReportDestination: vi.fn(),
 }));
 vi.mock("./Updates", () => ({ default: () => null }));
 vi.mock("./IssuesView", () => ({
@@ -77,6 +78,8 @@ beforeEach(() => {
   vi.mocked(bridge.calculateReport).mockResolvedValue(report);
   vi.mocked(bridge.listAnalyzerRuns).mockResolvedValue([]);
   vi.mocked(bridge.compareScanHistory).mockResolvedValue(diff);
+  vi.mocked(bridge.exportHistoryReport).mockResolvedValue();
+  vi.mocked(pickHistoryReportDestination).mockResolvedValue(null);
   vi.mocked(bridge.exportReport).mockResolvedValue();
   vi.mocked(pickProjectDirectory).mockResolvedValue("C:/projects/B");
   container = document.createElement("div");
@@ -242,6 +245,63 @@ describe("history selections", () => {
     expect(button("比较快照").disabled).toBe(false);
     expect(container.querySelector(".history-summary")).toBeNull();
     expect(container.textContent).not.toContain("质量分变化");
+  });
+});
+
+describe("history comparison export", () => {
+  const historyDestination = () => container.querySelector<HTMLInputElement>('input[aria-label="对比报告保存路径"]')!;
+  const enterHistoryDestination = (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(historyDestination(), value);
+    historyDestination().dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const compare = async () => {
+    await mount();
+    await click("历史报告");
+    await choose("基线扫描", "scan-2");
+    await choose("目标扫描", "scan-3");
+    await click("比较快照");
+  };
+
+  it("exports the selected baseline comparison through the native destination", async () => {
+    vi.mocked(pickHistoryReportDestination).mockResolvedValue("C:/reports/history.md");
+    await compare();
+    await click("选择对比保存位置");
+    expect(pickHistoryReportDestination).toHaveBeenCalledWith("markdown");
+    expect(historyDestination().value).toBe("C:/reports/history.md");
+    await click("导出对比报告");
+    expect(bridge.exportHistoryReport).toHaveBeenCalledWith("scan-2", "scan-3", "markdown", "C:/reports/history.md");
+  });
+
+  it("keeps the report picker, format, and destination locked until the dialog settles", async () => {
+    const picker = deferred<string | null>();
+    vi.mocked(pickHistoryReportDestination).mockReturnValue(picker.promise);
+    await compare();
+    await act(async () => {
+      button("选择对比保存位置").click();
+      button("选择对比保存位置").click();
+      select("对比报告格式").value = "json";
+      select("对比报告格式").dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(pickHistoryReportDestination).toHaveBeenCalledTimes(1);
+    expect(select("对比报告格式").disabled).toBe(true);
+    expect(select("对比报告格式").value).toBe("markdown");
+    expect(button("选择对比保存位置").disabled).toBe(true);
+    await act(async () => picker.resolve(null));
+    expect(select("对比报告格式").disabled).toBe(false);
+    expect(button("选择对比保存位置").disabled).toBe(false);
+    expect(button("导出对比报告").disabled).toBe(true);
+  });
+
+  it("validates manual entry and clears the path when the format changes", async () => {
+    await compare();
+    await click("导出对比报告");
+    expect(bridge.exportHistoryReport).not.toHaveBeenCalled();
+    await enterHistoryDestination("C:/reports/history.json");
+    await choose("对比报告格式", "json");
+    expect(historyDestination().value).toBe("");
+    await enterHistoryDestination("C:/reports/history.json");
+    await click("导出对比报告");
+    expect(bridge.exportHistoryReport).toHaveBeenCalledWith("scan-2", "scan-3", "json", "C:/reports/history.json");
   });
 });
 
