@@ -75,6 +75,7 @@ pub fn run() {
             commands::report::export_report,
             commands::architecture::get_architecture_graph,
             commands::history::compare_scan_history,
+            commands::history::export_history_report,
             commands::history::list_scan_runs,
             #[cfg(windows)]
             update::check_for_update,

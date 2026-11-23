@@ -212,6 +212,8 @@ export interface IssuePage {
 
 export type ReportFormat = "json" | "markdown" | "txt" | "html" | "sarif";
 
+export type HistoryReportFormat = "json" | "markdown";
+
 export interface ReportResult {
   score: ScoreSnapshot;
   content: string;

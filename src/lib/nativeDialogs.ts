@@ -1,5 +1,5 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { ReportFormat } from "./contracts";
+import type { HistoryReportFormat, ReportFormat } from "./contracts";
 
 function singlePath(result: string | string[] | null): string | null {
   return typeof result === "string" ? result : null;
@@ -52,5 +52,19 @@ export function pickIssueListDestination(): Promise<string | null> {
     defaultPath: "codedoctor-issues.json",
     title: "保存筛选后的问题清单",
     filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+}
+
+const historyReportOptions: Record<HistoryReportFormat, { defaultPath: string; name: string; extension: string }> = {
+  json: { defaultPath: "codedoctor-history.json", name: "JSON report", extension: "json" },
+  markdown: { defaultPath: "codedoctor-history.md", name: "Markdown report", extension: "md" },
+};
+
+export async function pickHistoryReportDestination(format: HistoryReportFormat): Promise<string | null> {
+  const options = historyReportOptions[format];
+  return await save({
+    defaultPath: options.defaultPath,
+    title: "保存基线对比报告",
+    filters: [{ name: options.name, extensions: [options.extension] }],
   });
 }

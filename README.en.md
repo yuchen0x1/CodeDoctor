@@ -19,15 +19,16 @@ CodeDoctor is an offline-first code quality inspection tool. The Windows desktop
 - **Seven-dimension scoring**: readability, structure, maintainability, complexity, duplication, architecture, and security/risk; dimensions without evidence are honestly reported as "not assessed".
 - **Architecture view**: static dependencies, dependency cycles, fan-in/fan-out, and duplicated-code relations, with evidence line numbers preserved.
 - **History snapshots**: results are saved to a local SQLite database; compare two snapshots for new, resolved, and persistent issues plus score changes.
+- **Baseline diff export**: save history comparisons as Markdown or JSON for review, CI archiving, and remediation tracking.
 - **Governance prompts**: full, focused, and targeted modes, optionally based on a completed baseline of the same project; copy or save as Markdown/TXT.
 - **Report export**: JSON, Markdown, TXT, HTML, and SARIF 2.1.0; the CLI supports severity-gated exit codes.
 - **Optional analyzers**: built-in analysis only by default; a locally installed Ruff can be enabled as an enhancement.
 
 ## Latest release
 
-### 0.2.3 (2026-11-21)
+### 0.3.0 (2026-11-23)
 
-SARIF export gains rule indexes and completion markers, report-dialog and scan-failure diagnostics races are fixed, credential masking coverage is extended, and the release pipeline adds version exclusivity. Full changes: [release notes](docs/releases/release-notes.md) and [Release v0.2.3](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.2.3).
+History reports now export Markdown/JSON baseline diffs with added, resolved, persistent, moved, and severity-changed findings. Full changes: [release notes](docs/releases/release-notes.md) and [Release v0.3.0](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.3.0).
 
 ## Getting started
 
@@ -37,9 +38,9 @@ Download the latest version from [Releases](https://github.com/yuchen0x1/CodeDoc
 
 | Platform | Download | Notes |
 | --- | --- | --- |
-| Windows x64 | `CodeDoctor_0.2.3_x64-setup.exe` or `CodeDoctor_0.2.3_x64_en-US.msi` | Per-user installation via the setup wizard; installed builds can verify and apply signed in-app updates |
+| Windows x64 | `CodeDoctor_0.3.0_x64-setup.exe` or `CodeDoctor_0.3.0_x64_en-US.msi` | Per-user installation via the setup wizard; installed builds can verify and apply signed in-app updates |
 | Windows x64 | `codedoctor.exe` | Portable build, run directly |
-| Linux x64 | `CodeDoctor_0.2.3_linux_x64-cli.tar.gz` | For terminals and CI; no GUI or WebView required |
+| Linux x64 | `CodeDoctor_0.3.0_linux_x64-cli.tar.gz` | For terminals and CI; no GUI or WebView required |
 
 The desktop app requires the Microsoft Edge WebView2 Runtime; data is written only to the current user's local scan database. See the [privacy and data boundary notes](docs/privacy.md) and the [installation and update guide](docs/engineering/updating.md).
 

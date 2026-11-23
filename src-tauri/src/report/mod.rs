@@ -1,4 +1,5 @@
 //! Deterministic report rendering from one scan snapshot.
+pub mod history;
 pub mod html;
 pub mod json;
 pub mod markdown;

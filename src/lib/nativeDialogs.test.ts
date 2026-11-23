@@ -53,4 +53,19 @@ describe("native file dialogs", () => {
       filters: [{ name, extensions: [extension] }],
     });
   });
+
+  it.each([
+    ["json", "codedoctor-history.json", "JSON report", "json"],
+    ["markdown", "codedoctor-history.md", "Markdown report", "md"],
+  ] as const)("saves %s history comparisons with a matching filter", async (format, defaultPath, name, extension) => {
+    save.mockResolvedValue("C:/reports/" + defaultPath);
+    const { pickHistoryReportDestination } = await import("./nativeDialogs");
+
+    await expect(pickHistoryReportDestination(format)).resolves.toBe("C:/reports/" + defaultPath);
+    expect(save).toHaveBeenCalledWith({
+      defaultPath,
+      title: "保存基线对比报告",
+      filters: [{ name, extensions: [extension] }],
+    });
+  });
 });

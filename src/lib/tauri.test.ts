@@ -34,6 +34,7 @@ describe("tauri bridge", () => {
       calculateReport,
       compareScanHistory,
       exportReport,
+      exportHistoryReport,
       generateGovernancePrompt,
       listScanRuns,
       exportStoredPrompt,
@@ -46,6 +47,7 @@ describe("tauri bridge", () => {
     await exportReport("run-1", "markdown", "C:/reports/run-1.md");
     await listScanRuns("project-1");
     await compareScanHistory("run-0", "run-1");
+    await exportHistoryReport("run-0", "run-1", "markdown", "C:/reports/history.md");
     await exportStoredPrompt("run-1", "prompt-1", "C:/reports/prompt.md");
     await exportIssueList("run-1", ["issue-1"], "C:/reports/issues.json");
 
@@ -56,6 +58,7 @@ describe("tauri bridge", () => {
       ["export_report", { runId: "run-1", format: "markdown", destination: "C:/reports/run-1.md" }],
       ["list_scan_runs", { projectId: "project-1" }],
       ["compare_scan_history", { baseRunId: "run-0", targetRunId: "run-1" }],
+      ["export_history_report", { baseRunId: "run-0", targetRunId: "run-1", format: "markdown", destination: "C:/reports/history.md" }],
       ["export_governance_prompt", { runId: "run-1", promptId: "prompt-1", destination: "C:/reports/prompt.md" }],
       ["export_issue_list", { runId: "run-1", issueIds: ["issue-1"], destination: "C:/reports/issues.json" }],
     ]);

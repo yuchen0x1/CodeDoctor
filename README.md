@@ -17,15 +17,16 @@
 - **七维评分**：可读性、结构、可维护性、复杂度、重复代码、架构、安全与风险；缺少证据的维度如实显示“未评估”。
 - **架构视图**：静态依赖、循环依赖、扇入扇出与重复代码关系，保留证据行号。
 - **历史快照**：扫描结果保存到本地 SQLite，比较两个快照的新增、已解决与持续问题及评分变化。
+- **基线对比导出**：将历史比较结果导出为 Markdown 或 JSON，便于代码评审、CI 归档与治理跟踪。
 - **治理提示词**：全面、重点、定点三种模式，可选用同项目的已完成基线生成增量任务书，复制或保存为 Markdown、TXT。
 - **报告导出**：JSON、Markdown、TXT、HTML、SARIF 2.1.0；CLI 支持按严重度门禁退出。
 - **可选分析器**：默认仅用内置分析，可启用本机已安装的 Ruff 作为增强。
 
 ## 最新版本
 
-### 0.2.3（2026-11-21）
+### 0.3.0（2026-11-23）
 
-SARIF 导出补齐规则索引与完成标记、修复报告对话框与扫描失败诊断的竞态、扩展凭据遮蔽覆盖、发布流水线增加版本互斥。完整变更见[更新记录](docs/releases/release-notes.md)与 [Release v0.2.3](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.2.3)。
+历史报告新增 Markdown/JSON 基线对比导出，保留新增、已解决、持续、位置和严重度变化，并在异步保存期间锁定控件。完整变更见[更新记录](docs/releases/release-notes.md)与 [Release v0.3.0](https://github.com/yuchen0x1/CodeDoctor/releases/tag/v0.3.0)。
 
 ## 快速开始
 
@@ -35,9 +36,9 @@ SARIF 导出补齐规则索引与完成标记、修复报告对话框与扫描�
 
 | 平台 | 下载 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `CodeDoctor_0.2.3_x64-setup.exe` 或 `CodeDoctor_0.2.3_x64_en-US.msi` | 按向导完成当前用户安装；安装版可在应用内验证并安装签名更新 |
+| Windows x64 | `CodeDoctor_0.3.0_x64-setup.exe` 或 `CodeDoctor_0.3.0_x64_en-US.msi` | 按向导完成当前用户安装；安装版可在应用内验证并安装签名更新 |
 | Windows x64 | `codedoctor.exe` | 免安装，直接运行 |
-| Linux x64 | `CodeDoctor_0.2.3_linux_x64-cli.tar.gz` | 终端与 CI 使用，无需 GUI 或 WebView |
+| Linux x64 | `CodeDoctor_0.3.0_linux_x64-cli.tar.gz` | 终端与 CI 使用，无需 GUI 或 WebView |
 
 桌面应用需要 Microsoft Edge WebView2 Runtime；数据只写入当前用户的本地扫描数据库，详见[隐私与数据边界](docs/privacy.md)与[安装和更新](docs/engineering/updating.md)。
 
